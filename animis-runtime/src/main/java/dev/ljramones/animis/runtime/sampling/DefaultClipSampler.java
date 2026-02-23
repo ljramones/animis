@@ -1,8 +1,10 @@
 package dev.ljramones.animis.runtime.sampling;
 
 import dev.ljramones.animis.clip.Clip;
+import dev.ljramones.animis.clip.RootMotionDef;
 import dev.ljramones.animis.clip.TrackMetadata;
 import dev.ljramones.animis.clip.TransformTrack;
+import dev.ljramones.animis.runtime.api.RootMotionDelta;
 import dev.ljramones.animis.runtime.pose.PoseBuffer;
 import dev.ljramones.animis.skeleton.BindTransform;
 import dev.ljramones.animis.skeleton.Joint;
@@ -10,10 +12,11 @@ import dev.ljramones.animis.skeleton.Skeleton;
 
 public final class DefaultClipSampler implements ClipSampler {
   @Override
-  public void sample(
+  public RootMotionDelta sample(
       final Clip clip,
       final Skeleton skeleton,
       final float timeSeconds,
+      final float previousTimeSeconds,
       final boolean loop,
       final PoseBuffer outPose) {
     if (outPose.jointCount() < skeleton.joints().size()) {
@@ -21,13 +24,36 @@ public final class DefaultClipSampler implements ClipSampler {
     }
     applyBindPose(skeleton, outPose);
     if (clip.tracks().isEmpty()) {
-      return;
+      return RootMotionDelta.ZERO;
     }
 
     final float normalizedTime = normalizeTime(timeSeconds, clip.durationSeconds(), loop);
-    for (final TransformTrack track : clip.tracks()) {
-      sampleTrack(track, normalizedTime, loop, outPose, skeleton.joints().size());
+    final float normalizedPrevTime = normalizeTime(previousTimeSeconds, clip.durationSeconds(), loop);
+    RootMotionDelta rootMotionDelta = RootMotionDelta.ZERO;
+    final TransformTrack rootTrack = clip.rootMotion()
+        .map(def -> findTrack(clip, def.rootJoint()))
+        .orElse(null);
+    if (rootTrack != null && clip.rootMotion().isPresent()) {
+      rootMotionDelta = computeRootMotionDelta(
+          rootTrack,
+          clip.rootMotion().get(),
+          timeSeconds,
+          previousTimeSeconds,
+          clip.durationSeconds(),
+          loop);
     }
+
+    for (final TransformTrack track : clip.tracks()) {
+      sampleTrack(
+          track,
+          normalizedTime,
+          normalizedPrevTime,
+          loop,
+          outPose,
+          skeleton.joints().size(),
+          clip.rootMotion().orElse(null));
+    }
+    return rootMotionDelta;
   }
 
   private static void applyBindPose(final Skeleton skeleton, final PoseBuffer outPose) {
@@ -53,9 +79,11 @@ public final class DefaultClipSampler implements ClipSampler {
   private static void sampleTrack(
       final TransformTrack track,
       final float timeSeconds,
+      final float previousTimeSeconds,
       final boolean loop,
       final PoseBuffer outPose,
-      final int skeletonJointCount) {
+      final int skeletonJointCount,
+      final RootMotionDef rootMotionDef) {
     if (track.jointIndex() < 0 || track.jointIndex() >= skeletonJointCount) {
       throw new IllegalArgumentException("Track jointIndex is out of bounds for skeleton");
     }
@@ -89,9 +117,18 @@ public final class DefaultClipSampler implements ClipSampler {
     }
 
     final int joint = track.jointIndex();
-    final float tx = lerp(read3(track.translations(), i0, 0, 0f), read3(track.translations(), i1, 0, 0f), alpha);
-    final float ty = lerp(read3(track.translations(), i0, 1, 0f), read3(track.translations(), i1, 1, 0f), alpha);
-    final float tz = lerp(read3(track.translations(), i0, 2, 0f), read3(track.translations(), i1, 2, 0f), alpha);
+    float tx = lerp(read3(track.translations(), i0, 0, 0f), read3(track.translations(), i1, 0, 0f), alpha);
+    float ty = lerp(read3(track.translations(), i0, 1, 0f), read3(track.translations(), i1, 1, 0f), alpha);
+    float tz = lerp(read3(track.translations(), i0, 2, 0f), read3(track.translations(), i1, 2, 0f), alpha);
+    if (rootMotionDef != null && track.jointIndex() == rootMotionDef.rootJoint()) {
+      if (rootMotionDef.extractTranslationXZ()) {
+        tx = 0f;
+        tz = 0f;
+      }
+      if (rootMotionDef.extractTranslationY()) {
+        ty = 0f;
+      }
+    }
     outPose.setTranslation(joint, tx, ty, tz);
 
     final float sx = lerp(read3(track.scales(), i0, 0, 1f), read3(track.scales(), i1, 0, 1f), alpha);
@@ -99,7 +136,7 @@ public final class DefaultClipSampler implements ClipSampler {
     final float sz = lerp(read3(track.scales(), i0, 2, 1f), read3(track.scales(), i1, 2, 1f), alpha);
     outPose.setScale(joint, sx, sy, sz);
 
-    final float[] q = slerp(
+    float[] q = slerp(
         read4(track.rotations(), i0, 0),
         read4(track.rotations(), i0, 1),
         read4(track.rotations(), i0, 2),
@@ -109,7 +146,109 @@ public final class DefaultClipSampler implements ClipSampler {
         read4(track.rotations(), i1, 2),
         read4(track.rotations(), i1, 3),
         clamp(alpha, 0f, 1f));
+    if (rootMotionDef != null && track.jointIndex() == rootMotionDef.rootJoint() && rootMotionDef.extractRotationY()) {
+      q = removeYaw(q);
+    }
     outPose.setRotation(joint, q[0], q[1], q[2], q[3]);
+  }
+
+  private static TransformTrack findTrack(final Clip clip, final int jointIndex) {
+    for (final TransformTrack track : clip.tracks()) {
+      if (track.jointIndex() == jointIndex) {
+        return track;
+      }
+    }
+    return null;
+  }
+
+  private static RootMotionDelta computeRootMotionDelta(
+      final TransformTrack rootTrack,
+      final RootMotionDef rootMotionDef,
+      final float timeSeconds,
+      final float previousTimeSeconds,
+      final float durationSeconds,
+      final boolean loop) {
+    if (durationSeconds <= 0f) {
+      return RootMotionDelta.ZERO;
+    }
+    final RootSample current = sampleRootUnwrapped(rootTrack, timeSeconds, durationSeconds, loop);
+    final RootSample previous = sampleRootUnwrapped(rootTrack, previousTimeSeconds, durationSeconds, loop);
+    float dx = current.tx - previous.tx;
+    float dy = current.ty - previous.ty;
+    float dz = current.tz - previous.tz;
+    float dyaw = normalizeAngle(current.yaw - previous.yaw);
+    if (!rootMotionDef.extractTranslationXZ()) {
+      dx = 0f;
+      dz = 0f;
+    }
+    if (!rootMotionDef.extractTranslationY()) {
+      dy = 0f;
+    }
+    if (!rootMotionDef.extractRotationY()) {
+      dyaw = 0f;
+    }
+    return new RootMotionDelta(dx, dy, dz, dyaw);
+  }
+
+  private static RootSample sampleRootUnwrapped(
+      final TransformTrack track,
+      final float absoluteTime,
+      final float duration,
+      final boolean loop) {
+    if (!loop) {
+      return sampleRootAt(track, clamp(absoluteTime, 0f, duration), duration);
+    }
+    final int loops = (int) Math.floor(absoluteTime / duration);
+    final float normalized = normalizeTime(absoluteTime, duration, true);
+    final RootSample inCycle = sampleRootAt(track, normalized, duration);
+    final RootSample start = sampleRootAt(track, 0f, duration);
+    final RootSample end = sampleRootAt(track, duration, duration);
+    final float cycleDx = end.tx - start.tx;
+    final float cycleDy = end.ty - start.ty;
+    final float cycleDz = end.tz - start.tz;
+    final float cycleDyaw = normalizeAngle(end.yaw - start.yaw);
+    return new RootSample(
+        inCycle.tx + loops * cycleDx,
+        inCycle.ty + loops * cycleDy,
+        inCycle.tz + loops * cycleDz,
+        inCycle.yaw + loops * cycleDyaw);
+  }
+
+  private static RootSample sampleRootAt(final TransformTrack track, final float timeSeconds, final float duration) {
+    final int sampleCount = sampleCount(track);
+    if (sampleCount <= 0) {
+      return new RootSample(0f, 0f, 0f, 0f);
+    }
+    final float interval = sampleInterval(track.metadata(), sampleCount);
+    final float effectiveInterval = interval > 0f ? interval : (sampleCount > 1 ? duration / (sampleCount - 1f) : 0f);
+    final int i0;
+    final int i1;
+    final float alpha;
+    if (sampleCount == 1 || effectiveInterval <= 0f) {
+      i0 = 0;
+      i1 = 0;
+      alpha = 0f;
+    } else {
+      final float frame = timeSeconds / effectiveInterval;
+      final int base = clamp((int) Math.floor(frame), 0, sampleCount - 1);
+      i0 = base;
+      i1 = base >= sampleCount - 1 ? base : base + 1;
+      alpha = i0 == i1 ? 0f : clamp(frame - base, 0f, 1f);
+    }
+    final float tx = lerp(read3(track.translations(), i0, 0, 0f), read3(track.translations(), i1, 0, 0f), alpha);
+    final float ty = lerp(read3(track.translations(), i0, 1, 0f), read3(track.translations(), i1, 1, 0f), alpha);
+    final float tz = lerp(read3(track.translations(), i0, 2, 0f), read3(track.translations(), i1, 2, 0f), alpha);
+    final float[] q = slerp(
+        read4(track.rotations(), i0, 0),
+        read4(track.rotations(), i0, 1),
+        read4(track.rotations(), i0, 2),
+        read4(track.rotations(), i0, 3),
+        read4(track.rotations(), i1, 0),
+        read4(track.rotations(), i1, 1),
+        read4(track.rotations(), i1, 2),
+        read4(track.rotations(), i1, 3),
+        alpha);
+    return new RootSample(tx, ty, tz, yawFromQuat(q[0], q[1], q[2], q[3]));
   }
 
   private static int sampleCount(final TransformTrack track) {
@@ -192,6 +331,45 @@ public final class DefaultClipSampler implements ClipSampler {
     return new float[] {x * invLen, y * invLen, z * invLen, w * invLen};
   }
 
+  private static float[] removeYaw(final float[] q) {
+    final float yaw = yawFromQuat(q[0], q[1], q[2], q[3]);
+    final float[] yawQuat = quatFromYaw(yaw);
+    final float[] invYaw = new float[] {-yawQuat[0], -yawQuat[1], -yawQuat[2], yawQuat[3]};
+    final float[] out = mul(invYaw, q);
+    return normalize(out[0], out[1], out[2], out[3]);
+  }
+
+  private static float yawFromQuat(final float x, final float y, final float z, final float w) {
+    final float siny = 2f * (w * y + x * z);
+    final float cosy = 1f - 2f * (y * y + x * x);
+    return (float) Math.atan2(siny, cosy);
+  }
+
+  private static float[] quatFromYaw(final float yaw) {
+    final float half = yaw * 0.5f;
+    return new float[] {0f, (float) Math.sin(half), 0f, (float) Math.cos(half)};
+  }
+
+  private static float[] mul(final float[] a, final float[] b) {
+    return new float[] {
+        a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
+        a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
+        a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
+        a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2]
+    };
+  }
+
+  private static float normalizeAngle(final float angle) {
+    float a = angle;
+    while (a > Math.PI) {
+      a -= (float) (2.0 * Math.PI);
+    }
+    while (a < -Math.PI) {
+      a += (float) (2.0 * Math.PI);
+    }
+    return a;
+  }
+
   private static int floorMod(final int a, final int b) {
     final int mod = a % b;
     return mod < 0 ? mod + b : mod;
@@ -221,4 +399,6 @@ public final class DefaultClipSampler implements ClipSampler {
     }
     return axis == 3 ? 1f : 0f;
   }
+
+  private record RootSample(float tx, float ty, float tz, float yaw) {}
 }

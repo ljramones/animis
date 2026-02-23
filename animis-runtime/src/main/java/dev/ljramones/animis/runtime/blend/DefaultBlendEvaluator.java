@@ -12,6 +12,7 @@ import dev.ljramones.animis.blend.ProceduralNode;
 import dev.ljramones.animis.blend.WeightShiftNode;
 import dev.ljramones.animis.clip.Clip;
 import dev.ljramones.animis.clip.ClipId;
+import dev.ljramones.animis.runtime.api.RootMotionDelta;
 import dev.ljramones.animis.runtime.pose.PoseBuffer;
 import dev.ljramones.animis.runtime.sampling.ClipSampler;
 import java.util.ArrayList;
@@ -75,8 +76,13 @@ public final class DefaultBlendEvaluator implements BlendEvaluator {
       throw new IllegalArgumentException("Clip not found for clipId: " + clipId.value());
     }
     final float time = ctx.clipTimes().getOrDefault(clipId, 0f) * node.speed();
+    final float dt = ctx.floatParams().getOrDefault("animis.deltaSeconds", 0f) * node.speed();
+    final float previousTime = time - dt;
     final boolean loop = ctx.clipLoops().getOrDefault(clipId, true);
-    this.clipSampler.sample(clip, ctx.skeleton(), time, loop, outPose);
+    final RootMotionDelta delta = this.clipSampler.sample(clip, ctx.skeleton(), time, previousTime, loop, outPose);
+    if (ctx.rootMotionAccumulator() != null) {
+      ctx.rootMotionAccumulator().add(delta);
+    }
   }
 
   private void evalLerpNode(

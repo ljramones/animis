@@ -3,6 +3,7 @@ package dev.ljramones.animis.runtime.api;
 import dev.ljramones.animis.clip.ClipId;
 import dev.ljramones.animis.ik.IkChain;
 import dev.ljramones.animis.runtime.blend.EvalContext;
+import dev.ljramones.animis.runtime.blend.RootMotionAccumulator;
 import dev.ljramones.animis.runtime.ik.IkSolver;
 import dev.ljramones.animis.runtime.ik.IkTarget;
 import dev.ljramones.animis.runtime.pose.Pose;
@@ -34,6 +35,7 @@ public final class DefaultAnimatorInstance implements AnimatorInstance {
   private final PoseBuffer poseBuffer;
   private Pose lastPose;
   private SkinningOutput lastSkinningOutput;
+  private RootMotionDelta lastRootMotionDelta;
 
   public DefaultAnimatorInstance(
       final Skeleton skeleton,
@@ -66,6 +68,7 @@ public final class DefaultAnimatorInstance implements AnimatorInstance {
     this.poseBuffer = new PoseBuffer(skeleton.joints().size());
     this.lastPose = this.poseBuffer.toPose();
     this.lastSkinningOutput = null;
+    this.lastRootMotionDelta = RootMotionDelta.ZERO;
   }
 
   @Override
@@ -92,13 +95,16 @@ public final class DefaultAnimatorInstance implements AnimatorInstance {
       entry.setValue(entry.getValue() + Math.max(0f, deltaSeconds));
     }
 
+    this.floatParams.put("animis.deltaSeconds", Math.max(0f, deltaSeconds));
+    final RootMotionAccumulator rootMotionAccumulator = new RootMotionAccumulator();
     final EvalContext ctx = new EvalContext(
         this.skeleton,
         this.clips,
         this.clipTimes,
         this.clipLoops,
         this.boolParams,
-        this.floatParams);
+        this.floatParams,
+        rootMotionAccumulator);
 
     this.stateMachineEvaluator.tick(this.stateMachineInstance, deltaSeconds, ctx, this.poseBuffer);
 
@@ -115,6 +121,7 @@ public final class DefaultAnimatorInstance implements AnimatorInstance {
     if (this.skinningComputer != null) {
       this.lastSkinningOutput = this.skinningComputer.compute(this.skeleton, this.lastPose);
     }
+    this.lastRootMotionDelta = rootMotionAccumulator.snapshot();
   }
 
   @Override
@@ -125,5 +132,10 @@ public final class DefaultAnimatorInstance implements AnimatorInstance {
   @Override
   public SkinningOutput skinningOutput() {
     return this.lastSkinningOutput;
+  }
+
+  @Override
+  public RootMotionDelta rootMotionDelta() {
+    return this.lastRootMotionDelta;
   }
 }

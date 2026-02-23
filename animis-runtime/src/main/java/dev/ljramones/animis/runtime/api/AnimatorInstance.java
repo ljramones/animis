@@ -16,4 +16,6 @@ public interface AnimatorInstance {
   Pose pose();
 
   SkinningOutput skinningOutput();
+
+  RootMotionDelta rootMotionDelta();
 }

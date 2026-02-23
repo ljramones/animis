@@ -25,13 +25,13 @@ final class ProceduralBlendEvaluatorTest {
     final PoseBuffer low = new PoseBuffer(1);
     evaluator.evaluate(
         node,
-        new EvalContext(skeleton, Map.of(), Map.of(), Map.of(), Map.of(), Map.of("animis.timeSeconds", 0.5f, "exhaustion", 0f)),
+        new EvalContext(skeleton, Map.of(), Map.of(), Map.of(), Map.of(), Map.of("animis.timeSeconds", 0.5f, "exhaustion", 0f), null),
         low);
 
     final PoseBuffer high = new PoseBuffer(1);
     evaluator.evaluate(
         node,
-        new EvalContext(skeleton, Map.of(), Map.of(), Map.of(), Map.of(), Map.of("animis.timeSeconds", 0.5f, "exhaustion", 1f)),
+        new EvalContext(skeleton, Map.of(), Map.of(), Map.of(), Map.of(), Map.of("animis.timeSeconds", 0.5f, "exhaustion", 1f), null),
         high);
 
     final float lowAngle = quatXAngle(low.localRotations());
@@ -49,7 +49,7 @@ final class ProceduralBlendEvaluatorTest {
 
     evaluator.evaluate(
         node,
-        new EvalContext(skeleton, Map.of(), Map.of(), Map.of(), Map.of(), Map.of("yaw", 2.0f, "pitch", 0f, "animis.deltaSeconds", 0.1f)),
+        new EvalContext(skeleton, Map.of(), Map.of(), Map.of(), Map.of(), Map.of("yaw", 2.0f, "pitch", 0f, "animis.deltaSeconds", 0.1f), null),
         out);
     final float firstYaw = quatYaw(out.localRotations());
     assertTrue(firstYaw > 0f);
@@ -58,7 +58,7 @@ final class ProceduralBlendEvaluatorTest {
     for (int i = 0; i < 20; i++) {
       evaluator.evaluate(
           node,
-          new EvalContext(skeleton, Map.of(), Map.of(), Map.of(), Map.of(), Map.of("yaw", 2.0f, "pitch", 0f, "animis.deltaSeconds", 0.1f)),
+          new EvalContext(skeleton, Map.of(), Map.of(), Map.of(), Map.of(), Map.of("yaw", 2.0f, "pitch", 0f, "animis.deltaSeconds", 0.1f), null),
           out);
     }
     final float settledYaw = quatYaw(out.localRotations());
@@ -75,13 +75,13 @@ final class ProceduralBlendEvaluatorTest {
     final PoseBuffer low = new PoseBuffer(1);
     evaluator.evaluate(
         node,
-        new EvalContext(skeleton, Map.of(), Map.of(), Map.of(), Map.of(), Map.of("animis.timeSeconds", 0.5f, "idleTime", 0f)),
+        new EvalContext(skeleton, Map.of(), Map.of(), Map.of(), Map.of(), Map.of("animis.timeSeconds", 0.5f, "idleTime", 0f), null),
         low);
 
     final PoseBuffer high = new PoseBuffer(1);
     evaluator.evaluate(
         node,
-        new EvalContext(skeleton, Map.of(), Map.of(), Map.of(), Map.of(), Map.of("animis.timeSeconds", 0.5f, "idleTime", 2f)),
+        new EvalContext(skeleton, Map.of(), Map.of(), Map.of(), Map.of(), Map.of("animis.timeSeconds", 0.5f, "idleTime", 2f), null),
         high);
 
     assertEquals(0f, low.localTranslations()[0], 1e-6f);

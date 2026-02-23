@@ -12,12 +12,24 @@ public record EvalContext(
     Map<ClipId, Float> clipTimes,
     Map<ClipId, Boolean> clipLoops,
     Map<String, Boolean> boolParams,
-    Map<String, Float> floatParams) {
+    Map<String, Float> floatParams,
+    RootMotionAccumulator rootMotionAccumulator) {
   public EvalContext {
     clips = clips == null ? Collections.emptyMap() : clips;
     clipTimes = clipTimes == null ? Collections.emptyMap() : clipTimes;
     clipLoops = clipLoops == null ? Collections.emptyMap() : clipLoops;
     boolParams = boolParams == null ? Collections.emptyMap() : boolParams;
     floatParams = floatParams == null ? Collections.emptyMap() : floatParams;
+  }
+
+  public EvalContext withoutRootMotion() {
+    return new EvalContext(
+        this.skeleton,
+        this.clips,
+        this.clipTimes,
+        this.clipLoops,
+        this.boolParams,
+        this.floatParams,
+        null);
   }
 }
