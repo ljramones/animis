@@ -19,6 +19,8 @@ import org.animis.runtime.skinning.SkinningComputer;
 import org.animis.runtime.state.DefaultStateMachineEvaluator;
 import org.animis.runtime.state.StateMachineEvaluator;
 import org.animis.runtime.state.StateMachineInstance;
+import org.animis.runtime.warp.DefaultPoseWarper;
+import org.animis.runtime.warp.PoseWarper;
 import org.animis.skeleton.Skeleton;
 import org.animis.state.StateDef;
 import org.animis.state.StateMachineDef;
@@ -32,6 +34,7 @@ public final class DefaultAnimationRuntime implements AnimationRuntime {
   private final List<IkChain> ikChains;
   private final SkinningComputer skinningComputer;
   private final IkSolver ikSolver;
+  private final PoseWarper poseWarper;
   private final SecondaryMotionSolver secondaryMotionSolver;
   private final StateMachineEvaluator stateMachineEvaluator;
 
@@ -43,6 +46,7 @@ public final class DefaultAnimationRuntime implements AnimationRuntime {
     final BlendEvaluator blendEvaluator = new DefaultBlendEvaluator(new DefaultClipSampler());
     this.stateMachineEvaluator = new DefaultStateMachineEvaluator(blendEvaluator);
     this.ikSolver = new TwoBoneIkSolver();
+    this.poseWarper = new DefaultPoseWarper();
     this.secondaryMotionSolver = new DefaultSecondaryMotionSolver();
     this.clips = new HashMap<>(clips);
     this.clipLoops = new HashMap<>(clipLoops);
@@ -58,6 +62,7 @@ public final class DefaultAnimationRuntime implements AnimationRuntime {
         this.stateMachineEvaluator,
         new StateMachineInstance(machine),
         this.ikSolver,
+        this.poseWarper,
         this.secondaryMotionSolver,
         this.skinningComputer,
         this.ikChains,

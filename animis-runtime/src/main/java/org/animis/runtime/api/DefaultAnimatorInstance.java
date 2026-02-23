@@ -14,7 +14,9 @@ import org.animis.runtime.skinning.SkinningComputer;
 import org.animis.runtime.skinning.SkinningOutput;
 import org.animis.runtime.state.StateMachineEvaluator;
 import org.animis.runtime.state.StateMachineInstance;
+import org.animis.runtime.warp.PoseWarper;
 import org.animis.skeleton.Skeleton;
+import org.animis.warp.WarpTarget;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -24,6 +26,7 @@ public final class DefaultAnimatorInstance implements AnimatorInstance {
   private final StateMachineEvaluator stateMachineEvaluator;
   private final StateMachineInstance stateMachineInstance;
   private final IkSolver ikSolver;
+  private final PoseWarper poseWarper;
   private final SecondaryMotionSolver secondaryMotionSolver;
   private final SkinningComputer skinningComputer;
   private final Map<String, IkChain> ikChainsByName;
@@ -34,6 +37,7 @@ public final class DefaultAnimatorInstance implements AnimatorInstance {
   private final Map<String, Boolean> boolParams;
   private final Map<String, Float> floatParams;
   private final Map<String, IkTarget> ikTargets;
+  private final Map<String, WarpTarget> warpTargets;
   private final Map<String, Runnable> eventListeners;
 
   private final PoseBuffer poseBuffer;
@@ -46,6 +50,7 @@ public final class DefaultAnimatorInstance implements AnimatorInstance {
       final StateMachineEvaluator stateMachineEvaluator,
       final StateMachineInstance stateMachineInstance,
       final IkSolver ikSolver,
+      final PoseWarper poseWarper,
       final SecondaryMotionSolver secondaryMotionSolver,
       final SkinningComputer skinningComputer,
       final List<IkChain> ikChains,
@@ -55,6 +60,7 @@ public final class DefaultAnimatorInstance implements AnimatorInstance {
     this.stateMachineEvaluator = stateMachineEvaluator;
     this.stateMachineInstance = stateMachineInstance;
     this.ikSolver = ikSolver;
+    this.poseWarper = poseWarper;
     this.secondaryMotionSolver = secondaryMotionSolver;
     this.skinningComputer = skinningComputer;
     this.ikChainsByName = new HashMap<>();
@@ -71,6 +77,7 @@ public final class DefaultAnimatorInstance implements AnimatorInstance {
     this.boolParams = new HashMap<>();
     this.floatParams = new HashMap<>();
     this.ikTargets = new HashMap<>();
+    this.warpTargets = new HashMap<>();
     this.eventListeners = new HashMap<>();
     this.poseBuffer = new PoseBuffer(skeleton.joints().size());
     this.lastPose = this.poseBuffer.toPose();
@@ -94,6 +101,22 @@ public final class DefaultAnimatorInstance implements AnimatorInstance {
       throw new IllegalArgumentException("Unknown IK chain: " + chainName);
     }
     this.ikTargets.put(chainName, target);
+  }
+
+  @Override
+  public void setWarpTarget(final WarpTarget target) {
+    if (target == null) {
+      throw new IllegalArgumentException("target cannot be null");
+    }
+    if (target.joint() < 0 || target.joint() >= this.skeleton.joints().size()) {
+      throw new IllegalArgumentException("Warp target joint out of bounds: " + target.joint());
+    }
+    this.warpTargets.put(target.name(), target);
+  }
+
+  @Override
+  public void clearWarpTarget(final String name) {
+    this.warpTargets.remove(name);
   }
 
   @Override
@@ -137,6 +160,10 @@ public final class DefaultAnimatorInstance implements AnimatorInstance {
           this.ikSolver.solve(this.poseBuffer, this.skeleton, chain, entry.getValue());
         }
       }
+    }
+
+    if (this.poseWarper != null && !this.warpTargets.isEmpty()) {
+      this.poseWarper.warp(this.poseBuffer, this.skeleton, List.copyOf(this.warpTargets.values()));
     }
 
     if (this.secondaryMotionSolver != null) {

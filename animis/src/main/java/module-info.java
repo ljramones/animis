@@ -7,4 +7,5 @@ module org.animis {
   exports org.animis.common;
   exports org.animis.retarget;
   exports org.animis.motion;
+  exports org.animis.warp;
 }
