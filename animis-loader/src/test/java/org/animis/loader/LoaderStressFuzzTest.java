@@ -2,6 +2,7 @@ package org.animis.loader;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayInputStream;
@@ -13,10 +14,77 @@ import org.junit.jupiter.api.Test;
 
 final class LoaderStressFuzzTest {
   @Test
-  void randomizedGltfInputs_loadWithoutInvalidNumbers() throws Exception {
+  void gltf_skinWithZeroJoints_throwsClearError() {
+    final String json = minimalGltf().replace("\"joints\":[0,1]", "\"joints\":[]");
+    final IllegalArgumentException ex = assertThrows(
+        IllegalArgumentException.class,
+        () -> new GltfAnimationLoader().load(new ByteArrayInputStream(json.getBytes()), "gltf"));
+    assertTrue(ex.getMessage().contains("joints"));
+  }
+
+  @Test
+  void gltf_animationTargetsMissingNode_throwsClearError() {
+    final String json = minimalGltf().replace("\"node\":1", "\"node\":99");
+    final IllegalArgumentException ex = assertThrows(
+        IllegalArgumentException.class,
+        () -> new GltfAnimationLoader().load(new ByteArrayInputStream(json.getBytes()), "gltf"));
+    assertTrue(ex.getMessage().contains("not part of any skin joints"));
+  }
+
+  @Test
+  void gltf_emptyAnimations_isValidAndReturnsNoClips() throws Exception {
+    final String json = minimalGltf().replaceAll("\"animations\":\\[.*]}$", "\"animations\":[]}");
+    final AnimationLoadResult result = new GltfAnimationLoader().load(new ByteArrayInputStream(json.getBytes()), "gltf");
+    assertEquals(1, result.skeletons().size());
+    assertTrue(result.clips().isEmpty());
+  }
+
+  @Test
+  void bvh_zeroFrames_isValidDegenerate() throws Exception {
+    final String bvh = """
+        HIERARCHY
+        ROOT Hips
+        {
+          OFFSET 0.0 0.0 0.0
+          CHANNELS 6 Xposition Yposition Zposition Zrotation Xrotation Yrotation
+        }
+        MOTION
+        Frames: 0
+        Frame Time: 0.0333333
+        """;
+    final AnimationLoadResult result = new BvhAnimationLoader().load(new ByteArrayInputStream(bvh.getBytes()), "bvh");
+    assertEquals(1, result.skeletons().size());
+    assertEquals(1, result.clips().size());
+    assertEquals(0f, result.clips().getFirst().durationSeconds(), 1e-6f);
+  }
+
+  @Test
+  void bvh_singleJoint_isValidDegenerate() throws Exception {
+    final String bvh = """
+        HIERARCHY
+        ROOT Hips
+        {
+          OFFSET 0.0 0.0 0.0
+          CHANNELS 6 Xposition Yposition Zposition Zrotation Xrotation Yrotation
+        }
+        MOTION
+        Frames: 1
+        Frame Time: 0.0166667
+        0 0 0 0 0 0
+        """;
+    final AnimationLoadResult result = new BvhAnimationLoader().load(new ByteArrayInputStream(bvh.getBytes()), "bvh");
+    assertEquals(1, result.skeletons().size());
+    assertEquals(1, result.skeletons().getFirst().joints().size());
+    assertEquals(1, result.clips().size());
+    assertEquals(1, result.clips().getFirst().tracks().size());
+    assertFiniteAndUnitQuaternions(result.clips().getFirst().tracks().getFirst().rotations());
+  }
+
+  @Test
+  void deterministicRandomGltfStructures_noUnexpectedExceptionsAndFiniteData() throws Exception {
     final Random random = new Random(0x600DF00DL);
     final GltfAnimationLoader loader = new GltfAnimationLoader();
-    for (int i = 0; i < 25; i++) {
+    for (int i = 0; i < 50; i++) {
       final String json = randomGltf(random);
       final AnimationLoadResult result = loader.load(new ByteArrayInputStream(json.getBytes()), "gltf");
       assertEquals(1, result.skeletons().size());
@@ -27,15 +95,16 @@ final class LoaderStressFuzzTest {
         assertFinite(track.translations());
         assertFinite(track.rotations());
         assertFinite(track.scales());
+        assertFiniteAndUnitQuaternions(track.rotations());
       });
     }
   }
 
   @Test
-  void randomizedBvhInputs_loadWithoutInvalidNumbers() throws Exception {
+  void deterministicRandomBvhStructures_noUnexpectedExceptionsAndFiniteData() throws Exception {
     final Random random = new Random(0xBEEFCAFE);
     final BvhAnimationLoader loader = new BvhAnimationLoader();
-    for (int i = 0; i < 25; i++) {
+    for (int i = 0; i < 50; i++) {
       final String bvh = randomBvh(random);
       final AnimationLoadResult result = loader.load(new ByteArrayInputStream(bvh.getBytes()), "bvh");
       assertEquals(1, result.skeletons().size());
@@ -46,8 +115,35 @@ final class LoaderStressFuzzTest {
         assertFinite(track.translations());
         assertFinite(track.rotations());
         assertFinite(track.scales());
+        assertFiniteAndUnitQuaternions(track.rotations());
       });
     }
+  }
+
+  private static String minimalGltf() {
+    final ByteBuffer b = ByteBuffer.allocate(192).order(ByteOrder.LITTLE_ENDIAN);
+    b.putFloat(0f).putFloat(1f);
+    b.putFloat(0f).putFloat(0f).putFloat(0f);
+    b.putFloat(1f).putFloat(0f).putFloat(0f);
+    b.putFloat(0f).putFloat(0f).putFloat(0f).putFloat(1f);
+    b.putFloat(0f).putFloat(0.70710677f).putFloat(0f).putFloat(0.70710677f);
+    putMat4(b, new float[] {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1});
+    putMat4(b, new float[] {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, -1, 0, 0, 1});
+    final String b64 = Base64.getEncoder().encodeToString(b.array());
+
+    return "{\"asset\":{\"version\":\"2.0\"},"
+        + "\"buffers\":[{\"uri\":\"data:application/octet-stream;base64," + b64 + "\",\"byteLength\":192}],"
+        + "\"bufferViews\":[{\"buffer\":0,\"byteOffset\":0,\"byteLength\":8},{\"buffer\":0,\"byteOffset\":8,\"byteLength\":24},"
+        + "{\"buffer\":0,\"byteOffset\":32,\"byteLength\":32},{\"buffer\":0,\"byteOffset\":64,\"byteLength\":128}],"
+        + "\"accessors\":[{\"bufferView\":0,\"componentType\":5126,\"count\":2,\"type\":\"SCALAR\"},"
+        + "{\"bufferView\":1,\"componentType\":5126,\"count\":2,\"type\":\"VEC3\"},"
+        + "{\"bufferView\":2,\"componentType\":5126,\"count\":2,\"type\":\"VEC4\"},"
+        + "{\"bufferView\":3,\"componentType\":5126,\"count\":2,\"type\":\"MAT4\"}],"
+        + "\"nodes\":[{\"name\":\"root\",\"children\":[1]},{\"name\":\"child\"}],"
+        + "\"skins\":[{\"joints\":[0,1],\"inverseBindMatrices\":3}],"
+        + "\"animations\":[{\"name\":\"walk\","
+        + "\"samplers\":[{\"input\":0,\"output\":1,\"interpolation\":\"LINEAR\"},{\"input\":0,\"output\":2,\"interpolation\":\"LINEAR\"}],"
+        + "\"channels\":[{\"sampler\":0,\"target\":{\"node\":1,\"path\":\"translation\"}},{\"sampler\":1,\"target\":{\"node\":1,\"path\":\"rotation\"}}]}]}";
   }
 
   private static String randomGltf(final Random random) {
@@ -110,11 +206,10 @@ final class LoaderStressFuzzTest {
     sb.append("Frame Time: 0.0333333\n");
     for (int i = 0; i < 10; i++) {
       for (int c = 0; c < 12; c++) {
-        final float v = rand(random, -40f, 40f);
         if (c > 0) {
           sb.append(' ');
         }
-        sb.append(v);
+        sb.append(rand(random, -40f, 40f));
       }
       sb.append('\n');
     }
@@ -144,6 +239,21 @@ final class LoaderStressFuzzTest {
     for (final float v : values) {
       assertTrue(Float.isFinite(v));
       assertTrue(Math.abs(v) < 1_000_000f);
+    }
+  }
+
+  private static void assertFiniteAndUnitQuaternions(final float[] rotations) {
+    for (int i = 0; i < rotations.length; i += 4) {
+      final float x = rotations[i];
+      final float y = rotations[i + 1];
+      final float z = rotations[i + 2];
+      final float w = rotations[i + 3];
+      assertTrue(Float.isFinite(x));
+      assertTrue(Float.isFinite(y));
+      assertTrue(Float.isFinite(z));
+      assertTrue(Float.isFinite(w));
+      final float len = (float) Math.sqrt(x * x + y * y + z * z + w * w);
+      assertTrue(Math.abs(1f - len) <= 1e-5f);
     }
   }
 }

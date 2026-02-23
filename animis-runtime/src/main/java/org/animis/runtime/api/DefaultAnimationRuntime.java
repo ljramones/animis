@@ -92,6 +92,9 @@ public final class DefaultAnimationRuntime implements AnimationRuntime {
   }
 
   private void validateNode(final BlendNode node) {
+    if (node == null) {
+      throw new IllegalArgumentException("BlendNode motion cannot be null");
+    }
     if (node instanceof ClipNode clipNode) {
       if (!this.clips.containsKey(clipNode.clipId())) {
         throw new IllegalArgumentException("Missing clip for clipId: " + clipNode.clipId().value());
