@@ -13,6 +13,7 @@
   <modules>
     <module>animis</module>
     <module>animis-runtime</module>
+    <module>animis-loader</module>
     <module>animis-neural</module>
     <module>animis-demo</module>
   </modules>
