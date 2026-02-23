@@ -2,10 +2,14 @@ package dev.ljramones.animis.runtime.blend;
 
 import dev.ljramones.animis.blend.AddNode;
 import dev.ljramones.animis.blend.BlendNode;
+import dev.ljramones.animis.blend.BreathingNode;
 import dev.ljramones.animis.blend.ClipNode;
+import dev.ljramones.animis.blend.HeadTurnNode;
 import dev.ljramones.animis.blend.LerpNode;
 import dev.ljramones.animis.blend.OneDChild;
 import dev.ljramones.animis.blend.OneDNode;
+import dev.ljramones.animis.blend.ProceduralNode;
+import dev.ljramones.animis.blend.WeightShiftNode;
 import dev.ljramones.animis.clip.Clip;
 import dev.ljramones.animis.clip.ClipId;
 import dev.ljramones.animis.runtime.pose.PoseBuffer;
@@ -17,6 +21,8 @@ import java.util.List;
 public final class DefaultBlendEvaluator implements BlendEvaluator {
   private static final int INITIAL_SCRATCH_CAPACITY = 8;
   private final ClipSampler clipSampler;
+  private final ThreadLocal<java.util.Map<Integer, float[]>> headTrackingState =
+      ThreadLocal.withInitial(java.util.HashMap::new);
   private final ThreadLocal<ScratchPool> scratchPool =
       ThreadLocal.withInitial(() -> new ScratchPool(INITIAL_SCRATCH_CAPACITY));
 
@@ -53,6 +59,10 @@ public final class DefaultBlendEvaluator implements BlendEvaluator {
     }
     if (node instanceof AddNode addNode) {
       evalAddNode(addNode, ctx, outPose, scratch);
+      return;
+    }
+    if (node instanceof ProceduralNode proceduralNode) {
+      evalProceduralNode(proceduralNode, ctx, outPose);
       return;
     }
     throw new IllegalArgumentException("Unsupported BlendNode: " + node.getClass().getName());
@@ -136,6 +146,93 @@ public final class DefaultBlendEvaluator implements BlendEvaluator {
     applyAdditive(base, additive, clamp01(node.weight()), outPose);
   }
 
+  private void evalProceduralNode(
+      final ProceduralNode node,
+      final EvalContext ctx,
+      final PoseBuffer outPose) {
+    setAdditiveIdentity(outPose);
+    final float timeSeconds = proceduralTimeSeconds(ctx);
+    if (node instanceof BreathingNode breathing) {
+      evalBreathingNode(breathing, ctx, timeSeconds, outPose);
+      return;
+    }
+    if (node instanceof WeightShiftNode weightShift) {
+      evalWeightShiftNode(weightShift, ctx, timeSeconds, outPose);
+      return;
+    }
+    if (node instanceof HeadTurnNode headTurn) {
+      evalHeadTurnNode(headTurn, ctx, outPose);
+      return;
+    }
+    throw new IllegalArgumentException("Unsupported ProceduralNode: " + node.getClass().getName());
+  }
+
+  private void evalBreathingNode(
+      final BreathingNode node,
+      final EvalContext ctx,
+      final float timeSeconds,
+      final PoseBuffer outPose) {
+    final int joint = node.spineJoint();
+    if (joint < 0 || joint >= outPose.jointCount()) {
+      return;
+    }
+    final float exhaustion = clamp01(ctx.floatParams().getOrDefault(node.exhaustionParameter(), 0f));
+    final float cycle = Math.max(1e-4f, node.cycleSeconds());
+    final float phase = (float) (2.0 * Math.PI * (timeSeconds / cycle));
+    final float angle = node.amplitudeRadians() * exhaustion * (float) Math.sin(phase);
+    final float[] q = quatFromAxisAngle(1f, 0f, 0f, angle);
+    outPose.setRotation(joint, q[0], q[1], q[2], q[3]);
+  }
+
+  private void evalWeightShiftNode(
+      final WeightShiftNode node,
+      final EvalContext ctx,
+      final float timeSeconds,
+      final PoseBuffer outPose) {
+    final int joint = node.hipJoint();
+    if (joint < 0 || joint >= outPose.jointCount()) {
+      return;
+    }
+    final float idleTime = Math.max(0f, ctx.floatParams().getOrDefault(node.idleTimeParameter(), 0f));
+    final float cycle = Math.max(1e-4f, node.cycleSeconds());
+    final float activation = clamp01(idleTime / cycle);
+    final float phase = (float) (2.0 * Math.PI * (timeSeconds / cycle));
+    final float shift = node.amplitudeMeters() * activation * (float) Math.sin(phase);
+    outPose.setTranslation(joint, shift, 0f, 0f);
+  }
+
+  private void evalHeadTurnNode(
+      final HeadTurnNode node,
+      final EvalContext ctx,
+      final PoseBuffer outPose) {
+    final int joint = node.headJoint();
+    if (joint < 0 || joint >= outPose.jointCount()) {
+      return;
+    }
+    final float targetYaw = clamp(
+        ctx.floatParams().getOrDefault(node.targetYawParameter(), 0f),
+        -Math.abs(node.maxYawRadians()),
+        Math.abs(node.maxYawRadians()));
+    final float targetPitch = clamp(
+        ctx.floatParams().getOrDefault(node.targetPitchParameter(), 0f),
+        -Math.abs(node.maxPitchRadians()),
+        Math.abs(node.maxPitchRadians()));
+
+    final float dt = Math.max(0f, ctx.floatParams().getOrDefault("animis.deltaSeconds", 1f / 60f));
+    final float maxStep = Math.max(0f, node.trackingSpeed()) * dt;
+    final java.util.Map<Integer, float[]> stateByJoint = this.headTrackingState.get();
+    final float[] state = stateByJoint.computeIfAbsent(joint, k -> new float[] {0f, 0f});
+    state[0] = moveTowards(state[0], targetYaw, maxStep);
+    state[1] = moveTowards(state[1], targetPitch, maxStep);
+
+    final float[] qYaw = quatFromAxisAngle(0f, 1f, 0f, state[0]);
+    final float[] qPitch = quatFromAxisAngle(1f, 0f, 0f, state[1]);
+    final float[] q = mul(
+        qYaw[0], qYaw[1], qYaw[2], qYaw[3],
+        qPitch[0], qPitch[1], qPitch[2], qPitch[3]);
+    outPose.setRotation(joint, q[0], q[1], q[2], q[3]);
+  }
+
   private static List<OneDChild> sortedChildren(final List<OneDChild> children) {
     final ArrayList<OneDChild> copy = new ArrayList<>(children);
     copy.sort(Comparator.comparing(OneDChild::threshold));
@@ -212,6 +309,52 @@ public final class DefaultBlendEvaluator implements BlendEvaluator {
 
   private static float clamp01(final float value) {
     return Math.max(0f, Math.min(1f, value));
+  }
+
+  private static float clamp(final float value, final float min, final float max) {
+    return Math.max(min, Math.min(max, value));
+  }
+
+  private static float moveTowards(final float current, final float target, final float maxStep) {
+    if (maxStep <= 0f) {
+      return current;
+    }
+    final float delta = target - current;
+    if (Math.abs(delta) <= maxStep) {
+      return target;
+    }
+    return current + Math.copySign(maxStep, delta);
+  }
+
+  private static float proceduralTimeSeconds(final EvalContext ctx) {
+    final Float explicit = ctx.floatParams().get("animis.timeSeconds");
+    if (explicit != null) {
+      return explicit;
+    }
+    float max = 0f;
+    for (final float t : ctx.clipTimes().values()) {
+      max = Math.max(max, t);
+    }
+    return max;
+  }
+
+  private static void setAdditiveIdentity(final PoseBuffer outPose) {
+    for (int i = 0; i < outPose.jointCount(); i++) {
+      outPose.setTranslation(i, 0f, 0f, 0f);
+      outPose.setScale(i, 1f, 1f, 1f);
+      outPose.setRotation(i, 0f, 0f, 0f, 1f);
+    }
+  }
+
+  private static float[] quatFromAxisAngle(final float ax, final float ay, final float az, final float angle) {
+    final float lenSq = ax * ax + ay * ay + az * az;
+    if (lenSq <= 1e-8f) {
+      return new float[] {0f, 0f, 0f, 1f};
+    }
+    final float invLen = 1f / (float) Math.sqrt(lenSq);
+    final float half = angle * 0.5f;
+    final float s = (float) Math.sin(half);
+    return new float[] {ax * invLen * s, ay * invLen * s, az * invLen * s, (float) Math.cos(half)};
   }
 
   private static float lerp(final float a, final float b, final float t) {

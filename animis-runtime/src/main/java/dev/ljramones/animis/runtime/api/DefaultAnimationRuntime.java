@@ -4,6 +4,7 @@ import dev.ljramones.animis.blend.BlendNode;
 import dev.ljramones.animis.blend.ClipNode;
 import dev.ljramones.animis.blend.LerpNode;
 import dev.ljramones.animis.blend.OneDNode;
+import dev.ljramones.animis.blend.ProceduralNode;
 import dev.ljramones.animis.clip.Clip;
 import dev.ljramones.animis.clip.ClipId;
 import dev.ljramones.animis.ik.IkChain;
@@ -86,6 +87,9 @@ public final class DefaultAnimationRuntime implements AnimationRuntime {
       for (final var child : oneDNode.children()) {
         validateNode(child.node());
       }
+      return;
+    }
+    if (node instanceof ProceduralNode) {
       return;
     }
     throw new IllegalArgumentException("Unsupported BlendNode: " + node.getClass().getName());

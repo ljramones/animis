@@ -6,6 +6,7 @@ import dev.ljramones.animis.blend.ClipNode;
 import dev.ljramones.animis.blend.LerpNode;
 import dev.ljramones.animis.blend.OneDChild;
 import dev.ljramones.animis.blend.OneDNode;
+import dev.ljramones.animis.blend.ProceduralNode;
 import dev.ljramones.animis.clip.Clip;
 import dev.ljramones.animis.clip.ClipId;
 import dev.ljramones.animis.runtime.blend.BlendEvaluator;
@@ -190,6 +191,9 @@ public final class DefaultStateMachineEvaluator implements StateMachineEvaluator
       for (final OneDChild child : new ArrayList<>(oneDNode.children())) {
         collectClipIds(child.node(), out);
       }
+      return;
+    }
+    if (node instanceof ProceduralNode) {
       return;
     }
     throw new IllegalArgumentException("Unsupported BlendNode: " + node.getClass().getName());
