@@ -52,7 +52,7 @@ torques toward a keyframe target, reacting physically to external forces (Euphor
 
 All hot paths are allocation-free in steady state. PoseBuffer is reused across frames.
 Thread-local scratch buffers eliminate allocation in the blend tree evaluator. Benchmarks
-run under JMH on JDK 25:
+run under forked JMH on JDK 25 (canonical run: `perf/comprehensive-20260223-095130.csv`):
 
 | Operation | Result | Target |
 |---|---|---|
@@ -64,7 +64,8 @@ run under JMH on JDK 25:
 Run the perf gate:
 
 ```bash
-cd animis-perf && mvn package && ./perf/check_baseline.sh
+mvn -f animis-perf/pom.xml -DskipTests compile exec:java -Dexec.mainClass=org.animis.perf.BenchmarkRunner
+./perf/check_baseline.sh
 ```
 
 ## Requirements
