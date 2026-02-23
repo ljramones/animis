@@ -36,6 +36,7 @@ final class DefaultBlendEvaluatorTest {
         Map.of(clipId, false),
         Map.of(),
         Map.of(),
+        null,
         null);
 
     final PoseBuffer out = new PoseBuffer(1);
@@ -56,6 +57,7 @@ final class DefaultBlendEvaluatorTest {
         Map.of(a, false, b, false),
         Map.of(),
         Map.of("speed", 0.25f),
+        null,
         null);
 
     final PoseBuffer out = new PoseBuffer(1);
@@ -77,6 +79,7 @@ final class DefaultBlendEvaluatorTest {
         Map.of(idle, false, run, false),
         Map.of(),
         Map.of("speed", 0.5f),
+        null,
         null);
 
     final OneDNode node = new OneDNode(
@@ -103,6 +106,7 @@ final class DefaultBlendEvaluatorTest {
         Map.of(base, false, add, false),
         Map.of(),
         Map.of(),
+        null,
         null);
 
     final AddNode node = new AddNode(new ClipNode(base, 1f), new ClipNode(add, 1f), 0.5f);

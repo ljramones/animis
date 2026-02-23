@@ -13,7 +13,8 @@ public record EvalContext(
     Map<ClipId, Boolean> clipLoops,
     Map<String, Boolean> boolParams,
     Map<String, Float> floatParams,
-    RootMotionAccumulator rootMotionAccumulator) {
+    RootMotionAccumulator rootMotionAccumulator,
+    EventAccumulator eventAccumulator) {
   public EvalContext {
     clips = clips == null ? Collections.emptyMap() : clips;
     clipTimes = clipTimes == null ? Collections.emptyMap() : clipTimes;
@@ -30,6 +31,19 @@ public record EvalContext(
         this.clipLoops,
         this.boolParams,
         this.floatParams,
+        null,
+        this.eventAccumulator);
+  }
+
+  public EvalContext withoutAccumulators() {
+    return new EvalContext(
+        this.skeleton,
+        this.clips,
+        this.clipTimes,
+        this.clipLoops,
+        this.boolParams,
+        this.floatParams,
+        null,
         null);
   }
 }

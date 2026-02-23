@@ -35,6 +35,7 @@ final class LayeredBlendEvaluatorTest {
         Map.of(baseId, false, upperId, false),
         Map.of(),
         Map.of(),
+        null,
         null);
 
     final BlendLayer base = new BlendLayer("base", LayerMode.OVERRIDE, new BoneMask("full", new float[] {1f, 1f}), new ClipNode(baseId, 1f));
@@ -61,6 +62,7 @@ final class LayeredBlendEvaluatorTest {
         Map.of(baseId, false, addId, false),
         Map.of(),
         Map.of(),
+        null,
         null);
 
     final BlendLayer base = new BlendLayer("base", LayerMode.OVERRIDE, new BoneMask("full", new float[] {1f, 1f}), new ClipNode(baseId, 1f));

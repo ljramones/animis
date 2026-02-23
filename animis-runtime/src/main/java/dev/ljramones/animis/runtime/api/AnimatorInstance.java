@@ -11,6 +11,10 @@ public interface AnimatorInstance {
 
   void setIkTarget(String chainName, IkTarget target);
 
+  void setEventListener(String eventName, Runnable listener);
+
+  void clearEventListener(String eventName);
+
   void update(float deltaSeconds);
 
   Pose pose();

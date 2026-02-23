@@ -1,6 +1,7 @@
 package dev.ljramones.animis.runtime.sampling;
 
 import dev.ljramones.animis.clip.Clip;
+import dev.ljramones.animis.clip.AnimationEvent;
 import dev.ljramones.animis.clip.RootMotionDef;
 import dev.ljramones.animis.clip.TrackMetadata;
 import dev.ljramones.animis.clip.TransformTrack;
@@ -12,7 +13,7 @@ import dev.ljramones.animis.skeleton.Skeleton;
 
 public final class DefaultClipSampler implements ClipSampler {
   @Override
-  public RootMotionDelta sample(
+  public ClipSampleResult sample(
       final Clip clip,
       final Skeleton skeleton,
       final float timeSeconds,
@@ -24,7 +25,7 @@ public final class DefaultClipSampler implements ClipSampler {
     }
     applyBindPose(skeleton, outPose);
     if (clip.tracks().isEmpty()) {
-      return RootMotionDelta.ZERO;
+      return new ClipSampleResult(RootMotionDelta.ZERO, detectEvents(clip, previousTimeSeconds, timeSeconds, loop));
     }
 
     final float normalizedTime = normalizeTime(timeSeconds, clip.durationSeconds(), loop);
@@ -53,7 +54,42 @@ public final class DefaultClipSampler implements ClipSampler {
           skeleton.joints().size(),
           clip.rootMotion().orElse(null));
     }
-    return rootMotionDelta;
+    return new ClipSampleResult(rootMotionDelta, detectEvents(clip, previousTimeSeconds, timeSeconds, loop));
+  }
+
+  private static java.util.List<String> detectEvents(
+      final Clip clip,
+      final float previousTimeSeconds,
+      final float currentTimeSeconds,
+      final boolean loop) {
+    if (clip.events().isEmpty() || clip.durationSeconds() <= 0f) {
+      return java.util.List.of();
+    }
+    final float duration = clip.durationSeconds();
+    final float prev = normalizeTime(previousTimeSeconds, duration, loop);
+    final float curr = normalizeTime(currentTimeSeconds, duration, loop);
+    final java.util.ArrayList<String> fired = new java.util.ArrayList<>();
+    if (!loop || curr >= prev) {
+      fireEventsInRange(clip.events(), prev, curr, duration, fired);
+    } else {
+      fireEventsInRange(clip.events(), prev, duration, duration, fired);
+      fireEventsInRange(clip.events(), 0f, curr, duration, fired);
+    }
+    return fired;
+  }
+
+  private static void fireEventsInRange(
+      final java.util.List<AnimationEvent> events,
+      final float start,
+      final float end,
+      final float duration,
+      final java.util.List<String> out) {
+    for (final AnimationEvent event : events) {
+      final float t = clamp(event.normalizedTime(), 0f, 1f) * duration;
+      if (t > start && t <= end) {
+        out.add(event.name());
+      }
+    }
   }
 
   private static void applyBindPose(final Skeleton skeleton, final PoseBuffer outPose) {

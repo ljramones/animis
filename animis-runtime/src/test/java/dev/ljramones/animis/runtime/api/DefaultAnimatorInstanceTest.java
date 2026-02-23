@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.ljramones.animis.blend.ClipNode;
+import dev.ljramones.animis.blend.LerpNode;
+import dev.ljramones.animis.clip.AnimationEvent;
 import dev.ljramones.animis.clip.Clip;
 import dev.ljramones.animis.clip.ClipId;
 import dev.ljramones.animis.clip.TrackMetadata;
@@ -22,6 +24,7 @@ import dev.ljramones.animis.state.TransitionDef;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 final class DefaultAnimatorInstanceTest {
@@ -114,6 +117,41 @@ final class DefaultAnimatorInstanceTest {
     assertTrue(delta > 1e-5f);
   }
 
+  @Test
+  void blendedClips_fireEventAtWeightedNormalizedTime() {
+    final ClipId a = new ClipId("a");
+    final ClipId b = new ClipId("b");
+    final Skeleton skeleton = oneJointSkeleton();
+    final StateMachineDef machine = new StateMachineDef(
+        "m",
+        List.of(
+            new StateDef(
+                "idle",
+                new LerpNode(new ClipNode(a, 1f), new ClipNode(b, 1f), "blend"),
+                List.of())),
+        "idle");
+
+    final Clip clipA = clipWithEvent(a, 0f, "step", 0.2f);
+    final Clip clipB = clipWithEvent(b, 0f, "step", 0.6f);
+    final DefaultAnimationRuntime runtime = new DefaultAnimationRuntime(
+        Map.of(a, clipA, b, clipB),
+        Map.of(a, true, b, true),
+        List.of(),
+        null);
+
+    final AnimatorInstance animator = runtime.create(machine, skeleton);
+    animator.setFloat("blend", 0.5f);
+    final AtomicInteger fired = new AtomicInteger();
+    animator.setEventListener("step", fired::incrementAndGet);
+
+    animator.update(0.39f);
+    assertTrue(fired.get() == 0);
+    animator.update(0.02f);
+    assertTrue(fired.get() == 1);
+    animator.update(0.10f);
+    assertTrue(fired.get() == 1);
+  }
+
   private static Clip clip(final ClipId id, final float x) {
     final TrackMetadata metadata = new TrackMetadata(1f, null, 1, 1f, null);
     final TransformTrack track = new TransformTrack(
@@ -123,6 +161,23 @@ final class DefaultAnimatorInstanceTest {
         new float[] {0f, 0f, 0f, 1f},
         new float[] {1f, 1f, 1f});
     return new Clip(id, id.value(), 1f, List.of(track));
+  }
+
+  private static Clip clipWithEvent(final ClipId id, final float x, final String eventName, final float normalizedTime) {
+    final TrackMetadata metadata = new TrackMetadata(1f, null, 1, 1f, null);
+    final TransformTrack track = new TransformTrack(
+        0,
+        metadata,
+        new float[] {x, 0f, 0f},
+        new float[] {0f, 0f, 0f, 1f},
+        new float[] {1f, 1f, 1f});
+    return new Clip(
+        id,
+        id.value(),
+        1f,
+        List.of(track),
+        Optional.empty(),
+        List.of(new AnimationEvent(eventName, normalizedTime)));
   }
 
   private static Skeleton oneJointSkeleton() {

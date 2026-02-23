@@ -149,7 +149,7 @@ final class DefaultStateMachineEvaluatorTest {
     clipTimes.put(runId, 0f);
     final Map<ClipId, Boolean> clipLoops = Map.of(idleId, false, runId, false);
     final Map<String, Boolean> boolParams = new HashMap<>();
-    final EvalContext ctx = new EvalContext(skeleton, clips, clipTimes, clipLoops, boolParams, new HashMap<>(), null);
+    final EvalContext ctx = new EvalContext(skeleton, clips, clipTimes, clipLoops, boolParams, new HashMap<>(), null, null);
 
     final DefaultStateMachineEvaluator evaluator = new DefaultStateMachineEvaluator(new DefaultBlendEvaluator(new DefaultClipSampler()));
     final StateMachineInstance sm = new StateMachineInstance(machine);
@@ -198,7 +198,7 @@ final class DefaultStateMachineEvaluatorTest {
     clipTimes.put(jumpId, 0f);
     final Map<ClipId, Boolean> loops = Map.of(idleId, false, runId, false, jumpId, false);
     final Map<String, Boolean> bools = new HashMap<>();
-    final EvalContext ctx = new EvalContext(skeleton, clips, clipTimes, loops, bools, new HashMap<>(), null);
+    final EvalContext ctx = new EvalContext(skeleton, clips, clipTimes, loops, bools, new HashMap<>(), null, null);
 
     final DefaultStateMachineEvaluator evaluator = new DefaultStateMachineEvaluator(new DefaultBlendEvaluator(new DefaultClipSampler()));
     final StateMachineInstance sm = new StateMachineInstance(machine);
@@ -246,7 +246,7 @@ final class DefaultStateMachineEvaluatorTest {
     clipTimes.put(landId, 0f);
     final Map<ClipId, Boolean> loops = Map.of(idleId, false, runId, false, jumpId, false, landId, false);
     final Map<String, Boolean> bools = new HashMap<>();
-    final EvalContext ctx = new EvalContext(skeleton, clips, clipTimes, loops, bools, new HashMap<>(), null);
+    final EvalContext ctx = new EvalContext(skeleton, clips, clipTimes, loops, bools, new HashMap<>(), null, null);
 
     final DefaultStateMachineEvaluator evaluator = new DefaultStateMachineEvaluator(new DefaultBlendEvaluator(new DefaultClipSampler()));
     final StateMachineInstance sm = new StateMachineInstance(machine);
@@ -288,7 +288,7 @@ final class DefaultStateMachineEvaluatorTest {
     clipTimes.put(jumpId, 0f);
     final Map<ClipId, Boolean> loops = Map.of(idleId, false, runId, false, jumpId, false);
     final Map<String, Boolean> bools = new HashMap<>();
-    final EvalContext ctx = new EvalContext(skeleton, clips, clipTimes, loops, bools, new HashMap<>(), null);
+    final EvalContext ctx = new EvalContext(skeleton, clips, clipTimes, loops, bools, new HashMap<>(), null, null);
 
     final DefaultStateMachineEvaluator evaluator = new DefaultStateMachineEvaluator(new DefaultBlendEvaluator(new DefaultClipSampler()));
     final StateMachineInstance sm = new StateMachineInstance(machine);
@@ -391,6 +391,7 @@ final class DefaultStateMachineEvaluatorTest {
           this.clipLoops,
           this.boolParams,
           this.floatParams,
+          null,
           null);
     }
   }

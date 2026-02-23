@@ -8,9 +8,19 @@ public record Clip(
     String name,
     float durationSeconds,
     List<TransformTrack> tracks,
-    Optional<RootMotionDef> rootMotion
+    Optional<RootMotionDef> rootMotion,
+    List<AnimationEvent> events
 ) {
   public Clip(final ClipId id, final String name, final float durationSeconds, final List<TransformTrack> tracks) {
-    this(id, name, durationSeconds, tracks, Optional.empty());
+    this(id, name, durationSeconds, tracks, Optional.empty(), List.of());
+  }
+
+  public Clip(
+      final ClipId id,
+      final String name,
+      final float durationSeconds,
+      final List<TransformTrack> tracks,
+      final Optional<RootMotionDef> rootMotion) {
+    this(id, name, durationSeconds, tracks, rootMotion, List.of());
   }
 }

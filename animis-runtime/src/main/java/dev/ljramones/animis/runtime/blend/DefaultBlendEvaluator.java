@@ -14,6 +14,7 @@ import dev.ljramones.animis.clip.Clip;
 import dev.ljramones.animis.clip.ClipId;
 import dev.ljramones.animis.runtime.api.RootMotionDelta;
 import dev.ljramones.animis.runtime.pose.PoseBuffer;
+import dev.ljramones.animis.runtime.sampling.ClipSampleResult;
 import dev.ljramones.animis.runtime.sampling.ClipSampler;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -79,9 +80,13 @@ public final class DefaultBlendEvaluator implements BlendEvaluator {
     final float dt = ctx.floatParams().getOrDefault("animis.deltaSeconds", 0f) * node.speed();
     final float previousTime = time - dt;
     final boolean loop = ctx.clipLoops().getOrDefault(clipId, true);
-    final RootMotionDelta delta = this.clipSampler.sample(clip, ctx.skeleton(), time, previousTime, loop, outPose);
+    final ClipSampleResult result = this.clipSampler.sample(clip, ctx.skeleton(), time, previousTime, loop, outPose);
+    final RootMotionDelta delta = result.rootMotionDelta();
     if (ctx.rootMotionAccumulator() != null) {
       ctx.rootMotionAccumulator().add(delta);
+    }
+    if (ctx.eventAccumulator() != null) {
+      ctx.eventAccumulator().addAll(result.firedEvents());
     }
   }
 
@@ -92,10 +97,12 @@ public final class DefaultBlendEvaluator implements BlendEvaluator {
       final ScratchPool scratch) {
     final PoseBuffer a = scratch.acquire();
     final PoseBuffer b = scratch.acquire();
-    evaluateNode(node.a(), ctx, a, scratch);
-    evaluateNode(node.b(), ctx, b, scratch);
+    final EvalContext sideEffectFree = ctx.withoutAccumulators();
+    evaluateNode(node.a(), sideEffectFree, a, scratch);
+    evaluateNode(node.b(), sideEffectFree, b, scratch);
     final float t = clamp01(ctx.floatParams().getOrDefault(node.parameter(), 0f));
     blendPoses(a, b, t, outPose);
+    accumulateWeightedClipEvents(node.a(), node.b(), t, ctx);
   }
 
   private void evalOneDNode(
@@ -131,9 +138,11 @@ public final class DefaultBlendEvaluator implements BlendEvaluator {
       final float t = span <= 0f ? 0f : clamp01((x - a.threshold()) / span);
       final PoseBuffer poseA = scratch.acquire();
       final PoseBuffer poseB = scratch.acquire();
-      evaluateNode(a.node(), ctx, poseA, scratch);
-      evaluateNode(b.node(), ctx, poseB, scratch);
+      final EvalContext sideEffectFree = ctx.withoutAccumulators();
+      evaluateNode(a.node(), sideEffectFree, poseA, scratch);
+      evaluateNode(b.node(), sideEffectFree, poseB, scratch);
       blendPoses(poseA, poseB, t, outPose);
+      accumulateWeightedClipEvents(a.node(), b.node(), t, ctx);
       return;
     }
 
@@ -147,9 +156,83 @@ public final class DefaultBlendEvaluator implements BlendEvaluator {
       final ScratchPool scratch) {
     final PoseBuffer base = scratch.acquire();
     final PoseBuffer additive = scratch.acquire();
-    evaluateNode(node.base(), ctx, base, scratch);
-    evaluateNode(node.additive(), ctx, additive, scratch);
+    final EvalContext sideEffectFree = ctx.withoutAccumulators();
+    evaluateNode(node.base(), sideEffectFree, base, scratch);
+    evaluateNode(node.additive(), sideEffectFree, additive, scratch);
     applyAdditive(base, additive, clamp01(node.weight()), outPose);
+  }
+
+  private void accumulateWeightedClipEvents(
+      final BlendNode a,
+      final BlendNode b,
+      final float weightB,
+      final EvalContext ctx) {
+    if (ctx.eventAccumulator() == null) {
+      return;
+    }
+    if (!(a instanceof ClipNode clipA) || !(b instanceof ClipNode clipB)) {
+      return;
+    }
+    final Clip ca = ctx.clips().get(clipA.clipId());
+    final Clip cb = ctx.clips().get(clipB.clipId());
+    if (ca == null || cb == null || ca.events().isEmpty() || cb.events().isEmpty()) {
+      return;
+    }
+    final float wB = clamp01(weightB);
+    final float wA = 1f - wB;
+    final float dt = ctx.floatParams().getOrDefault("animis.deltaSeconds", 0f);
+    final float currA = normalizedClipTime(ctx, clipA.clipId(), clipA.speed());
+    final float prevA = normalizedClipTimeAt(ctx, clipA.clipId(), clipA.speed(), -dt);
+    final float currB = normalizedClipTime(ctx, clipB.clipId(), clipB.speed());
+    final float prevB = normalizedClipTimeAt(ctx, clipB.clipId(), clipB.speed(), -dt);
+    final float curr = wA * currA + wB * currB;
+    final float prev = wA * prevA + wB * prevB;
+
+    final java.util.Map<String, Float> weightedEventTimes = new java.util.HashMap<>();
+    for (final var event : ca.events()) {
+      weightedEventTimes.put(event.name(), event.normalizedTime() * wA);
+    }
+    for (final var event : cb.events()) {
+      weightedEventTimes.merge(event.name(), event.normalizedTime() * wB, Float::sum);
+    }
+    for (final var entry : weightedEventTimes.entrySet()) {
+      final float t = clamp01(entry.getValue());
+      if (crossed(prev, curr, t)) {
+        ctx.eventAccumulator().add(entry.getKey());
+      }
+    }
+  }
+
+  private static boolean crossed(final float prev, final float curr, final float eventTime) {
+    if (curr >= prev) {
+      return eventTime > prev && eventTime <= curr;
+    }
+    return (eventTime > prev && eventTime <= 1f) || (eventTime >= 0f && eventTime <= curr);
+  }
+
+  private static float normalizedClipTime(final EvalContext ctx, final ClipId clipId, final float speed) {
+    return normalizedClipTimeAt(ctx, clipId, speed, 0f);
+  }
+
+  private static float normalizedClipTimeAt(
+      final EvalContext ctx,
+      final ClipId clipId,
+      final float speed,
+      final float offsetSeconds) {
+    final Clip clip = ctx.clips().get(clipId);
+    if (clip == null || clip.durationSeconds() <= 0f) {
+      return 0f;
+    }
+    final boolean loop = ctx.clipLoops().getOrDefault(clipId, true);
+    float t = (ctx.clipTimes().getOrDefault(clipId, 0f) + offsetSeconds) * speed;
+    final float d = clip.durationSeconds();
+    if (!loop) {
+      t = clamp(t, 0f, d);
+      return t / d;
+    }
+    final float wrapped = t % d;
+    final float n = wrapped < 0f ? wrapped + d : wrapped;
+    return n / d;
   }
 
   private void evalProceduralNode(

@@ -3,6 +3,7 @@ package dev.ljramones.animis.runtime.api;
 import dev.ljramones.animis.clip.ClipId;
 import dev.ljramones.animis.ik.IkChain;
 import dev.ljramones.animis.runtime.blend.EvalContext;
+import dev.ljramones.animis.runtime.blend.EventAccumulator;
 import dev.ljramones.animis.runtime.blend.RootMotionAccumulator;
 import dev.ljramones.animis.runtime.ik.IkSolver;
 import dev.ljramones.animis.runtime.ik.IkTarget;
@@ -31,6 +32,7 @@ public final class DefaultAnimatorInstance implements AnimatorInstance {
   private final Map<String, Boolean> boolParams;
   private final Map<String, Float> floatParams;
   private final Map<String, IkTarget> ikTargets;
+  private final Map<String, Runnable> eventListeners;
 
   private final PoseBuffer poseBuffer;
   private Pose lastPose;
@@ -65,6 +67,7 @@ public final class DefaultAnimatorInstance implements AnimatorInstance {
     this.boolParams = new HashMap<>();
     this.floatParams = new HashMap<>();
     this.ikTargets = new HashMap<>();
+    this.eventListeners = new HashMap<>();
     this.poseBuffer = new PoseBuffer(skeleton.joints().size());
     this.lastPose = this.poseBuffer.toPose();
     this.lastSkinningOutput = null;
@@ -90,6 +93,19 @@ public final class DefaultAnimatorInstance implements AnimatorInstance {
   }
 
   @Override
+  public void setEventListener(final String eventName, final Runnable listener) {
+    if (listener == null) {
+      throw new IllegalArgumentException("listener cannot be null");
+    }
+    this.eventListeners.put(eventName, listener);
+  }
+
+  @Override
+  public void clearEventListener(final String eventName) {
+    this.eventListeners.remove(eventName);
+  }
+
+  @Override
   public void update(final float deltaSeconds) {
     for (final Map.Entry<ClipId, Float> entry : this.clipTimes.entrySet()) {
       entry.setValue(entry.getValue() + Math.max(0f, deltaSeconds));
@@ -97,6 +113,7 @@ public final class DefaultAnimatorInstance implements AnimatorInstance {
 
     this.floatParams.put("animis.deltaSeconds", Math.max(0f, deltaSeconds));
     final RootMotionAccumulator rootMotionAccumulator = new RootMotionAccumulator();
+    final EventAccumulator eventAccumulator = new EventAccumulator();
     final EvalContext ctx = new EvalContext(
         this.skeleton,
         this.clips,
@@ -104,7 +121,8 @@ public final class DefaultAnimatorInstance implements AnimatorInstance {
         this.clipLoops,
         this.boolParams,
         this.floatParams,
-        rootMotionAccumulator);
+        rootMotionAccumulator,
+        eventAccumulator);
 
     this.stateMachineEvaluator.tick(this.stateMachineInstance, deltaSeconds, ctx, this.poseBuffer);
 
@@ -122,6 +140,12 @@ public final class DefaultAnimatorInstance implements AnimatorInstance {
       this.lastSkinningOutput = this.skinningComputer.compute(this.skeleton, this.lastPose);
     }
     this.lastRootMotionDelta = rootMotionAccumulator.snapshot();
+    for (final String eventName : eventAccumulator.snapshot()) {
+      final Runnable listener = this.eventListeners.get(eventName);
+      if (listener != null) {
+        listener.run();
+      }
+    }
   }
 
   @Override

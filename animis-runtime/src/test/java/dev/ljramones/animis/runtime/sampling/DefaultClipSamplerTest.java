@@ -10,6 +10,7 @@ import dev.ljramones.animis.clip.QuantizationSpec;
 import dev.ljramones.animis.clip.RootMotionDef;
 import dev.ljramones.animis.clip.TrackMetadata;
 import dev.ljramones.animis.clip.TransformTrack;
+import dev.ljramones.animis.clip.AnimationEvent;
 import dev.ljramones.animis.runtime.api.RootMotionDelta;
 import dev.ljramones.animis.runtime.pose.PoseBuffer;
 import dev.ljramones.animis.skeleton.BindTransform;
@@ -159,7 +160,8 @@ final class DefaultClipSamplerTest {
         Optional.of(new RootMotionDef(0, true, true, false)));
 
     final PoseBuffer out = new PoseBuffer(1);
-    final RootMotionDelta d = new DefaultClipSampler().sample(clip, skeleton, 0.5f, 0f, false, out);
+    final var sample = new DefaultClipSampler().sample(clip, skeleton, 0.5f, 0f, false, out);
+    final RootMotionDelta d = sample.rootMotionDelta();
     assertEquals(1f, d.dx(), 1e-5f);
     assertEquals(2f, d.dy(), 1e-5f);
     assertEquals(0f, d.dz(), 1e-5f);
@@ -188,7 +190,8 @@ final class DefaultClipSamplerTest {
         Optional.of(new RootMotionDef(0, true, false, false)));
 
     final PoseBuffer out = new PoseBuffer(1);
-    final RootMotionDelta d = new DefaultClipSampler().sample(clip, skeleton, 1.1f, 0.9f, true, out);
+    final var sample = new DefaultClipSampler().sample(clip, skeleton, 1.1f, 0.9f, true, out);
+    final RootMotionDelta d = sample.rootMotionDelta();
     assertEquals(0.4f, d.dx(), 1e-4f);
   }
 
@@ -213,9 +216,66 @@ final class DefaultClipSamplerTest {
         Optional.of(new RootMotionDef(0, false, true, false)));
 
     final PoseBuffer out = new PoseBuffer(1);
-    final RootMotionDelta d = new DefaultClipSampler().sample(clip, skeleton, 1f, 0f, false, out);
+    final var sample = new DefaultClipSampler().sample(clip, skeleton, 1f, 0f, false, out);
+    final RootMotionDelta d = sample.rootMotionDelta();
     assertEquals(0f, d.dx(), 1e-5f);
     assertEquals(2f, d.dy(), 1e-5f);
     assertEquals(0f, d.dz(), 1e-5f);
+  }
+
+  @Test
+  void sample_eventFiresExactlyOnceWhenCrossed() {
+    final Skeleton skeleton = new Skeleton(
+        "test",
+        List.of(new Joint(0, "root", -1, new BindTransform(0f, 0f, 0f, 0f, 0f, 0f, 1f, 1f, 1f, 1f))),
+        0);
+    final TrackMetadata metadata = new TrackMetadata(1f, CurveTypeHint.SAMPLED, 2, 1f, new QuantizationSpec(false, 0f, 0f, 0f));
+    final TransformTrack track = new TransformTrack(
+        0,
+        metadata,
+        new float[] {0f, 0f, 0f, 1f, 0f, 0f},
+        new float[] {0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f},
+        new float[] {1f, 1f, 1f, 1f, 1f, 1f});
+    final Clip clip = new Clip(
+        new ClipId("evt"),
+        "evt",
+        1f,
+        List.of(track),
+        Optional.empty(),
+        List.of(new AnimationEvent("footstep", 0.5f)));
+
+    final PoseBuffer out = new PoseBuffer(1);
+    final var a = new DefaultClipSampler().sample(clip, skeleton, 0.6f, 0.4f, false, out);
+    final var b = new DefaultClipSampler().sample(clip, skeleton, 0.7f, 0.6f, false, out);
+    assertEquals(1, a.firedEvents().size());
+    assertEquals("footstep", a.firedEvents().getFirst());
+    assertEquals(0, b.firedEvents().size());
+  }
+
+  @Test
+  void sample_eventFiresAcrossLoopBoundary() {
+    final Skeleton skeleton = new Skeleton(
+        "test",
+        List.of(new Joint(0, "root", -1, new BindTransform(0f, 0f, 0f, 0f, 0f, 0f, 1f, 1f, 1f, 1f))),
+        0);
+    final TrackMetadata metadata = new TrackMetadata(1f, CurveTypeHint.SAMPLED, 2, 1f, new QuantizationSpec(false, 0f, 0f, 0f));
+    final TransformTrack track = new TransformTrack(
+        0,
+        metadata,
+        new float[] {0f, 0f, 0f, 1f, 0f, 0f},
+        new float[] {0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f},
+        new float[] {1f, 1f, 1f, 1f, 1f, 1f});
+    final Clip clip = new Clip(
+        new ClipId("evt-loop"),
+        "evt-loop",
+        1f,
+        List.of(track),
+        Optional.empty(),
+        List.of(new AnimationEvent("start", 0.05f)));
+
+    final PoseBuffer out = new PoseBuffer(1);
+    final var result = new DefaultClipSampler().sample(clip, skeleton, 1.1f, 0.95f, true, out);
+    assertEquals(1, result.firedEvents().size());
+    assertEquals("start", result.firedEvents().getFirst());
   }
 }
