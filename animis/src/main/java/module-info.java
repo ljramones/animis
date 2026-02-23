@@ -1,10 +1,10 @@
-module dev.ljramones.animis {
-  exports dev.ljramones.animis.skeleton;
-  exports dev.ljramones.animis.clip;
-  exports dev.ljramones.animis.blend;
-  exports dev.ljramones.animis.state;
-  exports dev.ljramones.animis.ik;
-  exports dev.ljramones.animis.common;
-  exports dev.ljramones.animis.retarget;
-  exports dev.ljramones.animis.motion;
+module org.animis {
+  exports org.animis.skeleton;
+  exports org.animis.clip;
+  exports org.animis.blend;
+  exports org.animis.state;
+  exports org.animis.ik;
+  exports org.animis.common;
+  exports org.animis.retarget;
+  exports org.animis.motion;
 }

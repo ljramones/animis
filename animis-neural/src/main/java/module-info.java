@@ -1,5 +1,5 @@
-module dev.ljramones.animis.neural {
-  requires dev.ljramones.animis.runtime;
+module org.animis.neural {
+  requires com.microsoft.onnxruntime;
 
-  exports dev.ljramones.animis.neural.api;
+  exports org.animis.neural.api;
 }
