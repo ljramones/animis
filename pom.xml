@@ -15,6 +15,7 @@
     <module>animis-runtime</module>
     <module>animis-loader</module>
     <module>animis-neural</module>
+    <module>animis-perf</module>
     <module>animis-demo</module>
   </modules>
 

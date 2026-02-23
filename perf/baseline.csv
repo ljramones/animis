@@ -1,0 +1,5 @@
+benchmark,target_ms,notes
+AnimatorUpdateBenchmark.update100Joints,1.000,100-joint full update path
+MotionMatcherBenchmark.findBest10kFrames,0.500,10k-frame weighted nearest-neighbor
+ClipSamplerBenchmark.sample60SecondClip,0.300,60s sampled clip at 30fps
+SkinningComputerBenchmark.compute100Joints,0.300,100-joint matrix palette build
