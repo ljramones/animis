@@ -90,7 +90,7 @@ mvn -q test
 
 ## Documentation 
 
-- [technology_explainer.md](technology_explainer.md) — deep dive into every pipeline stage,
+- [technology_explainer.md](docs/technology_explainer.md) — deep dive into every pipeline stage,
   algorithm, and design decision
 - [docs/roadmap.md](docs/roadmap.md) — known gaps and future work
 
