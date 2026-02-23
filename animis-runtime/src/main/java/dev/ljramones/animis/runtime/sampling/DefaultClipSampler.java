@@ -5,6 +5,7 @@ import dev.ljramones.animis.clip.AnimationEvent;
 import dev.ljramones.animis.clip.RootMotionDef;
 import dev.ljramones.animis.clip.TrackMetadata;
 import dev.ljramones.animis.clip.TransformTrack;
+import dev.ljramones.animis.clip.CompressedTrackData;
 import dev.ljramones.animis.runtime.api.RootMotionDelta;
 import dev.ljramones.animis.runtime.pose.PoseBuffer;
 import dev.ljramones.animis.skeleton.BindTransform;
@@ -153,9 +154,9 @@ public final class DefaultClipSampler implements ClipSampler {
     }
 
     final int joint = track.jointIndex();
-    float tx = lerp(read3(track.translations(), i0, 0, 0f), read3(track.translations(), i1, 0, 0f), alpha);
-    float ty = lerp(read3(track.translations(), i0, 1, 0f), read3(track.translations(), i1, 1, 0f), alpha);
-    float tz = lerp(read3(track.translations(), i0, 2, 0f), read3(track.translations(), i1, 2, 0f), alpha);
+    float tx = lerp(readTranslation(track, i0, 0), readTranslation(track, i1, 0), alpha);
+    float ty = lerp(readTranslation(track, i0, 1), readTranslation(track, i1, 1), alpha);
+    float tz = lerp(readTranslation(track, i0, 2), readTranslation(track, i1, 2), alpha);
     if (rootMotionDef != null && track.jointIndex() == rootMotionDef.rootJoint()) {
       if (rootMotionDef.extractTranslationXZ()) {
         tx = 0f;
@@ -167,20 +168,16 @@ public final class DefaultClipSampler implements ClipSampler {
     }
     outPose.setTranslation(joint, tx, ty, tz);
 
-    final float sx = lerp(read3(track.scales(), i0, 0, 1f), read3(track.scales(), i1, 0, 1f), alpha);
-    final float sy = lerp(read3(track.scales(), i0, 1, 1f), read3(track.scales(), i1, 1, 1f), alpha);
-    final float sz = lerp(read3(track.scales(), i0, 2, 1f), read3(track.scales(), i1, 2, 1f), alpha);
+    final float sx = lerp(readScale(track, i0, 0), readScale(track, i1, 0), alpha);
+    final float sy = lerp(readScale(track, i0, 1), readScale(track, i1, 1), alpha);
+    final float sz = lerp(readScale(track, i0, 2), readScale(track, i1, 2), alpha);
     outPose.setScale(joint, sx, sy, sz);
 
+    final float[] q0 = readRotation(track, i0);
+    final float[] q1 = readRotation(track, i1);
     float[] q = slerp(
-        read4(track.rotations(), i0, 0),
-        read4(track.rotations(), i0, 1),
-        read4(track.rotations(), i0, 2),
-        read4(track.rotations(), i0, 3),
-        read4(track.rotations(), i1, 0),
-        read4(track.rotations(), i1, 1),
-        read4(track.rotations(), i1, 2),
-        read4(track.rotations(), i1, 3),
+        q0[0], q0[1], q0[2], q0[3],
+        q1[0], q1[1], q1[2], q1[3],
         clamp(alpha, 0f, 1f));
     if (rootMotionDef != null && track.jointIndex() == rootMotionDef.rootJoint() && rootMotionDef.extractRotationY()) {
       q = removeYaw(q);
@@ -271,18 +268,14 @@ public final class DefaultClipSampler implements ClipSampler {
       i1 = base >= sampleCount - 1 ? base : base + 1;
       alpha = i0 == i1 ? 0f : clamp(frame - base, 0f, 1f);
     }
-    final float tx = lerp(read3(track.translations(), i0, 0, 0f), read3(track.translations(), i1, 0, 0f), alpha);
-    final float ty = lerp(read3(track.translations(), i0, 1, 0f), read3(track.translations(), i1, 1, 0f), alpha);
-    final float tz = lerp(read3(track.translations(), i0, 2, 0f), read3(track.translations(), i1, 2, 0f), alpha);
+    final float tx = lerp(readTranslation(track, i0, 0), readTranslation(track, i1, 0), alpha);
+    final float ty = lerp(readTranslation(track, i0, 1), readTranslation(track, i1, 1), alpha);
+    final float tz = lerp(readTranslation(track, i0, 2), readTranslation(track, i1, 2), alpha);
+    final float[] q0 = readRotation(track, i0);
+    final float[] q1 = readRotation(track, i1);
     final float[] q = slerp(
-        read4(track.rotations(), i0, 0),
-        read4(track.rotations(), i0, 1),
-        read4(track.rotations(), i0, 2),
-        read4(track.rotations(), i0, 3),
-        read4(track.rotations(), i1, 0),
-        read4(track.rotations(), i1, 1),
-        read4(track.rotations(), i1, 2),
-        read4(track.rotations(), i1, 3),
+        q0[0], q0[1], q0[2], q0[3],
+        q1[0], q1[1], q1[2], q1[3],
         alpha);
     return new RootSample(tx, ty, tz, yawFromQuat(q[0], q[1], q[2], q[3]));
   }
@@ -291,6 +284,9 @@ public final class DefaultClipSampler implements ClipSampler {
     final TrackMetadata metadata = track.metadata();
     if (metadata.sampleCount() > 0) {
       return metadata.sampleCount();
+    }
+    if (track.compressed().isPresent()) {
+      return track.compressed().get().rotationMeta().length;
     }
     final int t = track.translations().length / 3;
     final int r = track.rotations().length / 4;
@@ -434,6 +430,70 @@ public final class DefaultClipSampler implements ClipSampler {
       return data[idx];
     }
     return axis == 3 ? 1f : 0f;
+  }
+
+  private static float readTranslation(final TransformTrack track, final int sampleIndex, final int axis) {
+    if (track.compressed().isPresent() && track.metadata().quantization() != null && track.metadata().quantization().enabled()) {
+      final CompressedTrackData c = track.compressed().get();
+      final float step = track.metadata().quantization().posStep() > 0f ? track.metadata().quantization().posStep() : 1e-4f;
+      final int idx = sampleIndex * 3 + axis;
+      final short q = idx < c.translationDeltas().length ? c.translationDeltas()[idx] : 0;
+      final float base = axis == 0 ? c.baseTx() : axis == 1 ? c.baseTy() : c.baseTz();
+      return base + q * step;
+    }
+    return read3(track.translations(), sampleIndex, axis, 0f);
+  }
+
+  private static float readScale(final TransformTrack track, final int sampleIndex, final int axis) {
+    if (track.compressed().isPresent() && track.metadata().quantization() != null && track.metadata().quantization().enabled()) {
+      final CompressedTrackData c = track.compressed().get();
+      final float step = track.metadata().quantization().scaleStep() > 0f ? track.metadata().quantization().scaleStep() : 1e-4f;
+      final int idx = sampleIndex * 3 + axis;
+      final short q = idx < c.scaleDeltas().length ? c.scaleDeltas()[idx] : 0;
+      final float base = axis == 0 ? c.baseSx() : axis == 1 ? c.baseSy() : c.baseSz();
+      return base + q * step;
+    }
+    return read3(track.scales(), sampleIndex, axis, 1f);
+  }
+
+  private static float[] readRotation(final TransformTrack track, final int sampleIndex) {
+    if (track.compressed().isPresent() && track.metadata().quantization() != null && track.metadata().quantization().enabled()) {
+      final CompressedTrackData c = track.compressed().get();
+      if (sampleIndex < 0 || sampleIndex >= c.rotationMeta().length) {
+        return new float[] {0f, 0f, 0f, 1f};
+      }
+      final int meta = c.rotationMeta()[sampleIndex] & 0xFF;
+      final int largest = meta & 0x3;
+      final int sign = ((meta >> 2) & 0x1) == 1 ? 1 : -1;
+      final int rb = sampleIndex * 3;
+      final float[] kept = new float[] {
+          dequantizeUnit(c.rotationSmallestThree()[rb]),
+          dequantizeUnit(c.rotationSmallestThree()[rb + 1]),
+          dequantizeUnit(c.rotationSmallestThree()[rb + 2])
+      };
+      final float[] q = new float[4];
+      int k = 0;
+      float sumSq = 0f;
+      for (int i = 0; i < 4; i++) {
+        if (i == largest) {
+          continue;
+        }
+        q[i] = kept[k++];
+        sumSq += q[i] * q[i];
+      }
+      q[largest] = sign * (float) Math.sqrt(Math.max(0f, 1f - sumSq));
+      return normalize(q[0], q[1], q[2], q[3]);
+    }
+    return new float[] {
+        read4(track.rotations(), sampleIndex, 0),
+        read4(track.rotations(), sampleIndex, 1),
+        read4(track.rotations(), sampleIndex, 2),
+        read4(track.rotations(), sampleIndex, 3)
+    };
+  }
+
+  private static float dequantizeUnit(final short q) {
+    return Math.max(-1f, Math.min(1f, q / 32767f));
   }
 
   private record RootSample(float tx, float ty, float tz, float yaw) {}
