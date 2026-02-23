@@ -9,6 +9,7 @@ import org.animis.runtime.ik.IkSolver;
 import org.animis.runtime.ik.IkTarget;
 import org.animis.runtime.pose.Pose;
 import org.animis.runtime.pose.PoseBuffer;
+import org.animis.runtime.physics.PhysicsCharacterController;
 import org.animis.runtime.secondary.SecondaryMotionSolver;
 import org.animis.runtime.skinning.SkinningComputer;
 import org.animis.runtime.skinning.SkinningOutput;
@@ -28,6 +29,7 @@ public final class DefaultAnimatorInstance implements AnimatorInstance {
   private final IkSolver ikSolver;
   private final PoseWarper poseWarper;
   private final SecondaryMotionSolver secondaryMotionSolver;
+  private final PhysicsCharacterController physicsCharacterController;
   private final SkinningComputer skinningComputer;
   private final Map<String, IkChain> ikChainsByName;
 
@@ -52,6 +54,7 @@ public final class DefaultAnimatorInstance implements AnimatorInstance {
       final IkSolver ikSolver,
       final PoseWarper poseWarper,
       final SecondaryMotionSolver secondaryMotionSolver,
+      final PhysicsCharacterController physicsCharacterController,
       final SkinningComputer skinningComputer,
       final List<IkChain> ikChains,
       final Map<ClipId, org.animis.clip.Clip> clips,
@@ -62,6 +65,7 @@ public final class DefaultAnimatorInstance implements AnimatorInstance {
     this.ikSolver = ikSolver;
     this.poseWarper = poseWarper;
     this.secondaryMotionSolver = secondaryMotionSolver;
+    this.physicsCharacterController = physicsCharacterController;
     this.skinningComputer = skinningComputer;
     this.ikChainsByName = new HashMap<>();
     for (final IkChain chain : ikChains) {
@@ -170,6 +174,14 @@ public final class DefaultAnimatorInstance implements AnimatorInstance {
       this.secondaryMotionSolver.solve(this.poseBuffer, this.skeleton, Math.max(0f, deltaSeconds));
     }
 
+    if (this.physicsCharacterController != null) {
+      this.physicsCharacterController.update(this.poseBuffer, this.skeleton, Math.max(0f, deltaSeconds));
+      final PoseBuffer simulated = this.physicsCharacterController.simulatedPose();
+      if (simulated != null) {
+        copyPose(simulated, this.poseBuffer);
+      }
+    }
+
     this.lastPose = this.poseBuffer.toPose();
     if (this.skinningComputer != null) {
       this.lastSkinningOutput = this.skinningComputer.compute(this.skeleton, this.lastPose);
@@ -196,5 +208,11 @@ public final class DefaultAnimatorInstance implements AnimatorInstance {
   @Override
   public RootMotionDelta rootMotionDelta() {
     return this.lastRootMotionDelta;
+  }
+
+  private static void copyPose(final PoseBuffer source, final PoseBuffer destination) {
+    System.arraycopy(source.localTranslations(), 0, destination.localTranslations(), 0, destination.localTranslations().length);
+    System.arraycopy(source.localRotations(), 0, destination.localRotations(), 0, destination.localRotations().length);
+    System.arraycopy(source.localScales(), 0, destination.localScales(), 0, destination.localScales().length);
   }
 }

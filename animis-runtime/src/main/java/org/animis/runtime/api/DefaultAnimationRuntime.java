@@ -12,6 +12,9 @@ import org.animis.runtime.blend.BlendEvaluator;
 import org.animis.runtime.blend.DefaultBlendEvaluator;
 import org.animis.runtime.ik.IkSolver;
 import org.animis.runtime.ik.TwoBoneIkSolver;
+import org.animis.runtime.physics.DefaultPhysicsCharacterController;
+import org.animis.runtime.physics.PhysicsCharacterController;
+import org.animis.runtime.physics.PhysicsCharacterDef;
 import org.animis.runtime.secondary.DefaultSecondaryMotionSolver;
 import org.animis.runtime.secondary.SecondaryMotionSolver;
 import org.animis.runtime.sampling.DefaultClipSampler;
@@ -36,6 +39,7 @@ public final class DefaultAnimationRuntime implements AnimationRuntime {
   private final IkSolver ikSolver;
   private final PoseWarper poseWarper;
   private final SecondaryMotionSolver secondaryMotionSolver;
+  private final PhysicsCharacterController physicsCharacterController;
   private final StateMachineEvaluator stateMachineEvaluator;
 
   public DefaultAnimationRuntime(
@@ -43,11 +47,21 @@ public final class DefaultAnimationRuntime implements AnimationRuntime {
       final Map<ClipId, Boolean> clipLoops,
       final List<IkChain> ikChains,
       final SkinningComputer skinningComputer) {
+    this(clips, clipLoops, ikChains, skinningComputer, null);
+  }
+
+  public DefaultAnimationRuntime(
+      final Map<ClipId, Clip> clips,
+      final Map<ClipId, Boolean> clipLoops,
+      final List<IkChain> ikChains,
+      final SkinningComputer skinningComputer,
+      final PhysicsCharacterDef physicsCharacterDef) {
     final BlendEvaluator blendEvaluator = new DefaultBlendEvaluator(new DefaultClipSampler());
     this.stateMachineEvaluator = new DefaultStateMachineEvaluator(blendEvaluator);
     this.ikSolver = new TwoBoneIkSolver();
     this.poseWarper = new DefaultPoseWarper();
     this.secondaryMotionSolver = new DefaultSecondaryMotionSolver();
+    this.physicsCharacterController = physicsCharacterDef == null ? null : new DefaultPhysicsCharacterController(physicsCharacterDef);
     this.clips = new HashMap<>(clips);
     this.clipLoops = new HashMap<>(clipLoops);
     this.ikChains = ikChains;
@@ -64,6 +78,7 @@ public final class DefaultAnimationRuntime implements AnimationRuntime {
         this.ikSolver,
         this.poseWarper,
         this.secondaryMotionSolver,
+        this.physicsCharacterController,
         this.skinningComputer,
         this.ikChains,
         this.clips,
