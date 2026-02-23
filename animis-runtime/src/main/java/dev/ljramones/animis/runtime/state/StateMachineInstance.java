@@ -2,6 +2,7 @@ package dev.ljramones.animis.runtime.state;
 
 import dev.ljramones.animis.state.StateDef;
 import dev.ljramones.animis.state.StateMachineDef;
+import dev.ljramones.animis.runtime.pose.PoseBuffer;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -53,21 +54,24 @@ public final class StateMachineInstance {
   }
 
   void startTransition(final String toStateName, final float blendSeconds) {
-    startTransition(toStateName, blendSeconds, 0.15f, null);
+    startTransition(this.currentStateName, toStateName, blendSeconds, 0.15f, null, null);
   }
 
   void startTransition(
+      final String fromStateName,
       final String toStateName,
       final float blendSeconds,
       final float halfLife,
+      final PoseBuffer interruptSnapshot,
       final InertialState inertialState) {
     this.activeTransition =
         new ActiveTransition(
-            this.currentStateName,
+            fromStateName,
             toStateName,
             0f,
             Math.max(0f, blendSeconds),
             Math.max(1e-4f, halfLife),
+            interruptSnapshot == null ? null : clonePoseBuffer(interruptSnapshot),
             inertialState);
   }
 
@@ -119,6 +123,7 @@ public final class StateMachineInstance {
       float elapsedSeconds,
       float blendSeconds,
       float halfLife,
+      PoseBuffer interruptSnapshot,
       InertialState inertialState) {
     ActiveTransition withElapsed(final float elapsed) {
       return new ActiveTransition(
@@ -127,7 +132,23 @@ public final class StateMachineInstance {
           elapsed,
           this.blendSeconds,
           this.halfLife,
+          this.interruptSnapshot,
           this.inertialState);
     }
+  }
+
+  private static PoseBuffer clonePoseBuffer(final PoseBuffer source) {
+    final PoseBuffer copy = new PoseBuffer(source.jointCount());
+    final float[] st = source.localTranslations();
+    final float[] sr = source.localRotations();
+    final float[] ss = source.localScales();
+    for (int i = 0; i < source.jointCount(); i++) {
+      final int tb = i * 3;
+      final int rb = i * 4;
+      copy.setTranslation(i, st[tb], st[tb + 1], st[tb + 2]);
+      copy.setRotation(i, sr[rb], sr[rb + 1], sr[rb + 2], sr[rb + 3]);
+      copy.setScale(i, ss[tb], ss[tb + 1], ss[tb + 2]);
+    }
+    return copy;
   }
 }

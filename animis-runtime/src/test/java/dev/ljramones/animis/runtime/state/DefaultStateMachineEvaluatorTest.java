@@ -2,6 +2,7 @@ package dev.ljramones.animis.runtime.state;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.ljramones.animis.blend.ClipNode;
@@ -148,7 +149,7 @@ final class DefaultStateMachineEvaluatorTest {
     clipTimes.put(runId, 0f);
     final Map<ClipId, Boolean> clipLoops = Map.of(idleId, false, runId, false);
     final Map<String, Boolean> boolParams = new HashMap<>();
-    final EvalContext ctx = new EvalContext(skeleton, clips, clipTimes, clipLoops, boolParams, new HashMap<>());
+    final EvalContext ctx = new EvalContext(skeleton, clips, clipTimes, clipLoops, boolParams, new HashMap<>(), null);
 
     final DefaultStateMachineEvaluator evaluator = new DefaultStateMachineEvaluator(new DefaultBlendEvaluator(new DefaultClipSampler()));
     final StateMachineInstance sm = new StateMachineInstance(machine);
@@ -168,6 +169,143 @@ final class DefaultStateMachineEvaluatorTest {
     }
     assertEquals("idle", sm.currentStateName());
     assertTrue(Math.abs(out.localTranslations()[0]) < 1e-2f);
+  }
+
+  @Test
+  void interrupt_midTransitionProducesValidPose() {
+    final ClipId idleId = new ClipId("idle");
+    final ClipId runId = new ClipId("run");
+    final ClipId jumpId = new ClipId("jump");
+    final Skeleton skeleton = new Skeleton(
+        "s",
+        List.of(new Joint(0, "root", -1, new BindTransform(0f, 0f, 0f, 0f, 0f, 0f, 1f, 1f, 1f, 1f))),
+        0);
+    final StateDef idle = new StateDef(
+        "idle",
+        new ClipNode(idleId, 1f),
+        List.of(new TransitionDef("run", new BoolParam("go", true), 0.5f, false, 0f, 0.15f)));
+    final StateDef run = new StateDef(
+        "run",
+        new ClipNode(runId, 1f),
+        List.of(new TransitionDef("jump", new BoolParam("jump", true), 0.3f, false, 0f, 0.15f)));
+    final StateDef jump = new StateDef("jump", new ClipNode(jumpId, 1f), List.of());
+    final StateMachineDef machine = new StateMachineDef("m", List.of(idle, run, jump), "idle");
+
+    final Map<ClipId, Clip> clips = Map.of(idleId, clip(idleId, 0f, 0f), runId, clip(runId, 10f, 10f), jumpId, clip(jumpId, 20f, 20f));
+    final Map<ClipId, Float> clipTimes = new HashMap<>();
+    clipTimes.put(idleId, 0f);
+    clipTimes.put(runId, 0f);
+    clipTimes.put(jumpId, 0f);
+    final Map<ClipId, Boolean> loops = Map.of(idleId, false, runId, false, jumpId, false);
+    final Map<String, Boolean> bools = new HashMap<>();
+    final EvalContext ctx = new EvalContext(skeleton, clips, clipTimes, loops, bools, new HashMap<>(), null);
+
+    final DefaultStateMachineEvaluator evaluator = new DefaultStateMachineEvaluator(new DefaultBlendEvaluator(new DefaultClipSampler()));
+    final StateMachineInstance sm = new StateMachineInstance(machine);
+    final PoseBuffer out = new PoseBuffer(1);
+
+    bools.put("go", true);
+    evaluator.tick(sm, 0f, ctx, out);
+    evaluator.tick(sm, 0.1f, ctx, out);
+    bools.put("jump", true);
+    evaluator.tick(sm, 0.016f, ctx, out);
+
+    assertTrue(sm.hasActiveTransition());
+    assertEquals("run", sm.activeTransition().fromStateName());
+    assertEquals("jump", sm.activeTransition().toStateName());
+    assertNotNull(sm.activeTransition().interruptSnapshot());
+    assertTrue(out.localTranslations()[0] >= 0f && out.localTranslations()[0] <= 20f);
+  }
+
+  @Test
+  void chainedInterrupts_doNotAccumulateDrift() {
+    final ClipId idleId = new ClipId("idle");
+    final ClipId runId = new ClipId("run");
+    final ClipId jumpId = new ClipId("jump");
+    final ClipId landId = new ClipId("land");
+    final Skeleton skeleton = new Skeleton(
+        "s",
+        List.of(new Joint(0, "root", -1, new BindTransform(0f, 0f, 0f, 0f, 0f, 0f, 1f, 1f, 1f, 1f))),
+        0);
+
+    final StateDef idle = new StateDef("idle", new ClipNode(idleId, 1f), List.of(new TransitionDef("run", new BoolParam("go", true), 0.4f, false, 0f, 0.1f)));
+    final StateDef run = new StateDef("run", new ClipNode(runId, 1f), List.of(new TransitionDef("jump", new BoolParam("jump", true), 0.4f, false, 0f, 0.1f)));
+    final StateDef jump = new StateDef("jump", new ClipNode(jumpId, 1f), List.of(new TransitionDef("land", new BoolParam("land", true), 0.4f, false, 0f, 0.1f)));
+    final StateDef land = new StateDef("land", new ClipNode(landId, 1f), List.of());
+    final StateMachineDef machine = new StateMachineDef("m", List.of(idle, run, jump, land), "idle");
+
+    final Map<ClipId, Clip> clips = Map.of(
+        idleId, clip(idleId, 0f, 0f),
+        runId, clip(runId, 10f, 10f),
+        jumpId, clip(jumpId, 20f, 20f),
+        landId, clip(landId, 5f, 5f));
+    final Map<ClipId, Float> clipTimes = new HashMap<>();
+    clipTimes.put(idleId, 0f);
+    clipTimes.put(runId, 0f);
+    clipTimes.put(jumpId, 0f);
+    clipTimes.put(landId, 0f);
+    final Map<ClipId, Boolean> loops = Map.of(idleId, false, runId, false, jumpId, false, landId, false);
+    final Map<String, Boolean> bools = new HashMap<>();
+    final EvalContext ctx = new EvalContext(skeleton, clips, clipTimes, loops, bools, new HashMap<>(), null);
+
+    final DefaultStateMachineEvaluator evaluator = new DefaultStateMachineEvaluator(new DefaultBlendEvaluator(new DefaultClipSampler()));
+    final StateMachineInstance sm = new StateMachineInstance(machine);
+    final PoseBuffer out = new PoseBuffer(1);
+
+    bools.put("go", true);
+    evaluator.tick(sm, 0f, ctx, out);
+    evaluator.tick(sm, 0.08f, ctx, out);
+    bools.put("jump", true);
+    evaluator.tick(sm, 0.016f, ctx, out);
+    bools.put("land", true);
+    evaluator.tick(sm, 0.016f, ctx, out);
+    for (int i = 0; i < 120; i++) {
+      evaluator.tick(sm, 0.016f, ctx, out);
+    }
+    assertEquals("land", sm.currentStateName());
+    assertTrue(Math.abs(out.localTranslations()[0] - 5f) < 0.05f);
+  }
+
+  @Test
+  void interruptedInertialBlend_convergesToLatestTarget() {
+    final ClipId idleId = new ClipId("idle");
+    final ClipId runId = new ClipId("run");
+    final ClipId jumpId = new ClipId("jump");
+    final Skeleton skeleton = new Skeleton(
+        "s",
+        List.of(new Joint(0, "root", -1, new BindTransform(0f, 0f, 0f, 0f, 0f, 0f, 1f, 1f, 1f, 1f))),
+        0);
+
+    final StateDef idle = new StateDef("idle", new ClipNode(idleId, 1f), List.of(new TransitionDef("run", new BoolParam("go", true), 1.0f, false, 0f, 0.2f)));
+    final StateDef run = new StateDef("run", new ClipNode(runId, 1f), List.of(new TransitionDef("jump", new BoolParam("jump", true), 1.0f, false, 0f, 0.2f)));
+    final StateDef jump = new StateDef("jump", new ClipNode(jumpId, 1f), List.of());
+    final StateMachineDef machine = new StateMachineDef("m", List.of(idle, run, jump), "idle");
+
+    final Map<ClipId, Clip> clips = Map.of(idleId, clip(idleId, 0f, 0f), runId, clip(runId, 10f, 10f), jumpId, clip(jumpId, 20f, 20f));
+    final Map<ClipId, Float> clipTimes = new HashMap<>();
+    clipTimes.put(idleId, 0f);
+    clipTimes.put(runId, 0f);
+    clipTimes.put(jumpId, 0f);
+    final Map<ClipId, Boolean> loops = Map.of(idleId, false, runId, false, jumpId, false);
+    final Map<String, Boolean> bools = new HashMap<>();
+    final EvalContext ctx = new EvalContext(skeleton, clips, clipTimes, loops, bools, new HashMap<>(), null);
+
+    final DefaultStateMachineEvaluator evaluator = new DefaultStateMachineEvaluator(new DefaultBlendEvaluator(new DefaultClipSampler()));
+    final StateMachineInstance sm = new StateMachineInstance(machine);
+    final PoseBuffer out = new PoseBuffer(1);
+
+    bools.put("go", true);
+    evaluator.tick(sm, 0f, ctx, out);
+    evaluator.tick(sm, 0.12f, ctx, out);
+    bools.put("jump", true);
+    evaluator.tick(sm, 0.016f, ctx, out);
+    final float earlyError = Math.abs(20f - out.localTranslations()[0]);
+    for (int i = 0; i < 180; i++) {
+      evaluator.tick(sm, 0.016f, ctx, out);
+    }
+    final float lateError = Math.abs(20f - out.localTranslations()[0]);
+    assertTrue(lateError < earlyError);
+    assertTrue(lateError < 0.05f);
   }
 
   private static Fixture fixture(final boolean hasExitTime) {
@@ -252,7 +390,8 @@ final class DefaultStateMachineEvaluatorTest {
           this.clipTimes,
           this.clipLoops,
           this.boolParams,
-          this.floatParams);
+          this.floatParams,
+          null);
     }
   }
 }

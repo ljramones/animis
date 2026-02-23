@@ -40,6 +40,7 @@ public final class DefaultStateMachineEvaluator implements StateMachineEvaluator
       final float dt,
       final EvalContext ctx,
       final PoseBuffer outPose) {
+    tryInterruptTransition(sm, ctx, outPose);
     if (!sm.hasActiveTransition()) {
       tryStartTransition(sm, ctx, outPose);
     }
@@ -69,6 +70,47 @@ public final class DefaultStateMachineEvaluator implements StateMachineEvaluator
     }
   }
 
+  private void tryInterruptTransition(
+      final StateMachineInstance sm,
+      final EvalContext ctx,
+      final PoseBuffer outPose) {
+    if (!sm.hasActiveTransition()) {
+      return;
+    }
+    final StateMachineInstance.ActiveTransition active = sm.activeTransition();
+    final StateDef currentTargetState = sm.state(active.toStateName());
+    for (final TransitionDef transition : currentTargetState.transitions()) {
+      if (!evaluateCondition(transition.condition(), ctx)) {
+        continue;
+      }
+      if (transition.hasExitTime()
+          && normalizedStateTime(currentTargetState.motion(), ctx) < transition.exitTimeNormalized()) {
+        continue;
+      }
+      final Scratch s = this.scratch.get();
+      final PoseBuffer currentSnapshot = s.snapshot(outPose.jointCount());
+      copyPose(outPose, currentSnapshot);
+      final PoseBuffer toPose = s.target(outPose.jointCount());
+      this.blendEvaluator.evaluate(sm.state(transition.toState()).motion(), ctx.withoutRootMotion(), toPose);
+      final InertialState inertialState =
+          InertialState.capture(
+              currentSnapshot,
+              toPose,
+              sm.hasLastPose() ? sm.lastTranslations() : null,
+              sm.hasLastPose() ? sm.lastRotations() : null,
+              sm.hasLastPose() ? sm.lastScales() : null,
+              sm.lastDtSeconds());
+      sm.startTransition(
+          active.toStateName(),
+          transition.toState(),
+          transition.blendSeconds(),
+          transition.halfLife(),
+          currentSnapshot,
+          inertialState);
+      return;
+    }
+  }
+
   private void tryStartTransition(final StateMachineInstance sm, final EvalContext ctx, final PoseBuffer outPose) {
     final StateDef current = sm.currentState();
     for (final TransitionDef transition : current.transitions()) {
@@ -82,8 +124,8 @@ public final class DefaultStateMachineEvaluator implements StateMachineEvaluator
       final Scratch s = this.scratch.get();
       final PoseBuffer fromPose = s.from(outPose.jointCount());
       final PoseBuffer toPose = s.target(outPose.jointCount());
-      this.blendEvaluator.evaluate(current.motion(), ctx, fromPose);
-      this.blendEvaluator.evaluate(sm.state(transition.toState()).motion(), ctx, toPose);
+      this.blendEvaluator.evaluate(current.motion(), ctx.withoutRootMotion(), fromPose);
+      this.blendEvaluator.evaluate(sm.state(transition.toState()).motion(), ctx.withoutRootMotion(), toPose);
       final InertialState inertialState =
           InertialState.capture(
               fromPose,
@@ -93,11 +135,26 @@ public final class DefaultStateMachineEvaluator implements StateMachineEvaluator
               sm.hasLastPose() ? sm.lastScales() : null,
               sm.lastDtSeconds());
       sm.startTransition(
+          current.name(),
           transition.toState(),
           transition.blendSeconds(),
           transition.halfLife(),
+          null,
           inertialState);
       return;
+    }
+  }
+
+  private static void copyPose(final PoseBuffer src, final PoseBuffer dst) {
+    final float[] st = src.localTranslations();
+    final float[] sr = src.localRotations();
+    final float[] ss = src.localScales();
+    for (int i = 0; i < dst.jointCount(); i++) {
+      final int tb = i * 3;
+      final int rb = i * 4;
+      dst.setTranslation(i, st[tb], st[tb + 1], st[tb + 2]);
+      dst.setRotation(i, sr[rb], sr[rb + 1], sr[rb + 2], sr[rb + 3]);
+      dst.setScale(i, ss[tb], ss[tb + 1], ss[tb + 2]);
     }
   }
 
@@ -202,6 +259,7 @@ public final class DefaultStateMachineEvaluator implements StateMachineEvaluator
   private static final class Scratch {
     private PoseBuffer fromPose;
     private PoseBuffer targetPose;
+    private PoseBuffer snapshotPose;
 
     private PoseBuffer from(final int jointCount) {
       if (this.fromPose == null || this.fromPose.jointCount() != jointCount) {
@@ -215,6 +273,13 @@ public final class DefaultStateMachineEvaluator implements StateMachineEvaluator
         this.targetPose = new PoseBuffer(jointCount);
       }
       return this.targetPose;
+    }
+
+    private PoseBuffer snapshot(final int jointCount) {
+      if (this.snapshotPose == null || this.snapshotPose.jointCount() != jointCount) {
+        this.snapshotPose = new PoseBuffer(jointCount);
+      }
+      return this.snapshotPose;
     }
   }
 }
