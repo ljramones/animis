@@ -26,7 +26,8 @@ import java.util.Set;
 
 public final class DefaultStateMachineEvaluator implements StateMachineEvaluator {
   private final BlendEvaluator blendEvaluator;
-  private final ThreadLocal<PoseBuffer> scratch = new ThreadLocal<>();
+  private final InertialBlendEvaluator inertialBlendEvaluator = new InertialBlendEvaluator();
+  private final ThreadLocal<Scratch> scratch = ThreadLocal.withInitial(Scratch::new);
 
   public DefaultStateMachineEvaluator(final BlendEvaluator blendEvaluator) {
     this.blendEvaluator = blendEvaluator;
@@ -39,35 +40,35 @@ public final class DefaultStateMachineEvaluator implements StateMachineEvaluator
       final EvalContext ctx,
       final PoseBuffer outPose) {
     if (!sm.hasActiveTransition()) {
-      tryStartTransition(sm, ctx);
+      tryStartTransition(sm, ctx, outPose);
     }
 
     if (!sm.hasActiveTransition()) {
       this.blendEvaluator.evaluate(sm.currentState().motion(), ctx, outPose);
+      sm.captureLastPose(outPose.localTranslations(), outPose.localRotations(), outPose.localScales(), dt);
       return;
     }
 
     sm.advanceTransition(dt);
+    final Scratch s = this.scratch.get();
     final StateMachineInstance.ActiveTransition transition = sm.activeTransition();
-    final StateDef fromState = sm.state(transition.fromStateName());
     final StateDef toState = sm.state(transition.toStateName());
+    final PoseBuffer targetPose = s.target(outPose.jointCount());
+    this.blendEvaluator.evaluate(toState.motion(), ctx, targetPose);
+    this.inertialBlendEvaluator.apply(
+        transition.inertialState(),
+        transition.halfLife(),
+        dt,
+        targetPose,
+        outPose);
+    sm.captureLastPose(outPose.localTranslations(), outPose.localRotations(), outPose.localScales(), dt);
 
-    final float alpha =
-        transition.blendSeconds() <= 0f
-            ? 1f
-            : clamp01(transition.elapsedSeconds() / transition.blendSeconds());
-
-    final PoseBuffer fromPose = scratch(outPose.jointCount());
-    this.blendEvaluator.evaluate(fromState.motion(), ctx, fromPose);
-    this.blendEvaluator.evaluate(toState.motion(), ctx, outPose);
-    blend(fromPose, outPose, alpha, outPose);
-
-    if (alpha >= 1f) {
+    if (transition.elapsedSeconds() >= transition.blendSeconds()) {
       sm.completeTransition();
     }
   }
 
-  private void tryStartTransition(final StateMachineInstance sm, final EvalContext ctx) {
+  private void tryStartTransition(final StateMachineInstance sm, final EvalContext ctx, final PoseBuffer outPose) {
     final StateDef current = sm.currentState();
     for (final TransitionDef transition : current.transitions()) {
       if (!evaluateCondition(transition.condition(), ctx)) {
@@ -77,7 +78,24 @@ public final class DefaultStateMachineEvaluator implements StateMachineEvaluator
           && normalizedStateTime(current.motion(), ctx) < transition.exitTimeNormalized()) {
         continue;
       }
-      sm.startTransition(transition.toState(), transition.blendSeconds());
+      final Scratch s = this.scratch.get();
+      final PoseBuffer fromPose = s.from(outPose.jointCount());
+      final PoseBuffer toPose = s.target(outPose.jointCount());
+      this.blendEvaluator.evaluate(current.motion(), ctx, fromPose);
+      this.blendEvaluator.evaluate(sm.state(transition.toState()).motion(), ctx, toPose);
+      final InertialState inertialState =
+          InertialState.capture(
+              fromPose,
+              toPose,
+              sm.hasLastPose() ? sm.lastTranslations() : null,
+              sm.hasLastPose() ? sm.lastRotations() : null,
+              sm.hasLastPose() ? sm.lastScales() : null,
+              sm.lastDtSeconds());
+      sm.startTransition(
+          transition.toState(),
+          transition.blendSeconds(),
+          transition.halfLife(),
+          inertialState);
       return;
     }
   }
@@ -177,97 +195,22 @@ public final class DefaultStateMachineEvaluator implements StateMachineEvaluator
     throw new IllegalArgumentException("Unsupported BlendNode: " + node.getClass().getName());
   }
 
-  private PoseBuffer scratch(final int jointCount) {
-    PoseBuffer buffer = this.scratch.get();
-    if (buffer == null || buffer.jointCount() != jointCount) {
-      buffer = new PoseBuffer(jointCount);
-      this.scratch.set(buffer);
+  private static final class Scratch {
+    private PoseBuffer fromPose;
+    private PoseBuffer targetPose;
+
+    private PoseBuffer from(final int jointCount) {
+      if (this.fromPose == null || this.fromPose.jointCount() != jointCount) {
+        this.fromPose = new PoseBuffer(jointCount);
+      }
+      return this.fromPose;
     }
-    return buffer;
-  }
 
-  private static void blend(
-      final PoseBuffer fromPose,
-      final PoseBuffer toPose,
-      final float alpha,
-      final PoseBuffer outPose) {
-    final float[] ft = fromPose.localTranslations();
-    final float[] tt = toPose.localTranslations();
-    final float[] fs = fromPose.localScales();
-    final float[] ts = toPose.localScales();
-    final float[] fr = fromPose.localRotations();
-    final float[] tr = toPose.localRotations();
-
-    for (int i = 0; i < outPose.jointCount(); i++) {
-      final int tBase = i * 3;
-      outPose.setTranslation(
-          i,
-          lerp(ft[tBase], tt[tBase], alpha),
-          lerp(ft[tBase + 1], tt[tBase + 1], alpha),
-          lerp(ft[tBase + 2], tt[tBase + 2], alpha));
-      outPose.setScale(
-          i,
-          lerp(fs[tBase], ts[tBase], alpha),
-          lerp(fs[tBase + 1], ts[tBase + 1], alpha),
-          lerp(fs[tBase + 2], ts[tBase + 2], alpha));
-
-      final int rBase = i * 4;
-      final float[] q = slerp(
-          fr[rBase], fr[rBase + 1], fr[rBase + 2], fr[rBase + 3],
-          tr[rBase], tr[rBase + 1], tr[rBase + 2], tr[rBase + 3],
-          alpha);
-      outPose.setRotation(i, q[0], q[1], q[2], q[3]);
+    private PoseBuffer target(final int jointCount) {
+      if (this.targetPose == null || this.targetPose.jointCount() != jointCount) {
+        this.targetPose = new PoseBuffer(jointCount);
+      }
+      return this.targetPose;
     }
-  }
-
-  private static float lerp(final float a, final float b, final float t) {
-    return a + (b - a) * t;
-  }
-
-  private static float clamp01(final float x) {
-    return Math.max(0f, Math.min(1f, x));
-  }
-
-  private static float[] slerp(
-      final float ax,
-      final float ay,
-      final float az,
-      final float aw,
-      final float bxIn,
-      final float byIn,
-      final float bzIn,
-      final float bwIn,
-      final float t) {
-    float bx = bxIn;
-    float by = byIn;
-    float bz = bzIn;
-    float bw = bwIn;
-    float dot = ax * bx + ay * by + az * bz + aw * bw;
-    if (dot < 0f) {
-      dot = -dot;
-      bx = -bx;
-      by = -by;
-      bz = -bz;
-      bw = -bw;
-    }
-    if (dot > 0.9995f) {
-      return normalize(lerp(ax, bx, t), lerp(ay, by, t), lerp(az, bz, t), lerp(aw, bw, t));
-    }
-    final float theta0 = (float) Math.acos(dot);
-    final float theta = theta0 * t;
-    final float sinTheta = (float) Math.sin(theta);
-    final float sinTheta0 = (float) Math.sin(theta0);
-    final float s0 = (float) Math.cos(theta) - dot * sinTheta / sinTheta0;
-    final float s1 = sinTheta / sinTheta0;
-    return normalize(s0 * ax + s1 * bx, s0 * ay + s1 * by, s0 * az + s1 * bz, s0 * aw + s1 * bw);
-  }
-
-  private static float[] normalize(final float x, final float y, final float z, final float w) {
-    final float lenSq = x * x + y * y + z * z + w * w;
-    if (lenSq <= 0f) {
-      return new float[] {0f, 0f, 0f, 1f};
-    }
-    final float invLen = 1f / (float) Math.sqrt(lenSq);
-    return new float[] {x * invLen, y * invLen, z * invLen, w * invLen};
   }
 }

@@ -10,6 +10,10 @@ public final class StateMachineInstance {
   private final Map<String, StateDef> stateByName;
   private String currentStateName;
   private ActiveTransition activeTransition;
+  private float[] lastTranslations;
+  private float[] lastRotations;
+  private float[] lastScales;
+  private float lastDtSeconds;
 
   public StateMachineInstance(final StateMachineDef definition) {
     this.definition = definition;
@@ -49,7 +53,22 @@ public final class StateMachineInstance {
   }
 
   void startTransition(final String toStateName, final float blendSeconds) {
-    this.activeTransition = new ActiveTransition(this.currentStateName, toStateName, 0f, Math.max(0f, blendSeconds));
+    startTransition(toStateName, blendSeconds, 0.15f, null);
+  }
+
+  void startTransition(
+      final String toStateName,
+      final float blendSeconds,
+      final float halfLife,
+      final InertialState inertialState) {
+    this.activeTransition =
+        new ActiveTransition(
+            this.currentStateName,
+            toStateName,
+            0f,
+            Math.max(0f, blendSeconds),
+            Math.max(1e-4f, halfLife),
+            inertialState);
   }
 
   void advanceTransition(final float dtSeconds) {
@@ -67,13 +86,48 @@ public final class StateMachineInstance {
     this.activeTransition = null;
   }
 
+  void captureLastPose(final float[] translations, final float[] rotations, final float[] scales, final float dt) {
+    this.lastTranslations = java.util.Arrays.copyOf(translations, translations.length);
+    this.lastRotations = java.util.Arrays.copyOf(rotations, rotations.length);
+    this.lastScales = java.util.Arrays.copyOf(scales, scales.length);
+    this.lastDtSeconds = Math.max(0f, dt);
+  }
+
+  float[] lastTranslations() {
+    return this.lastTranslations;
+  }
+
+  float[] lastRotations() {
+    return this.lastRotations;
+  }
+
+  float[] lastScales() {
+    return this.lastScales;
+  }
+
+  float lastDtSeconds() {
+    return this.lastDtSeconds;
+  }
+
+  boolean hasLastPose() {
+    return this.lastTranslations != null && this.lastRotations != null && this.lastScales != null;
+  }
+
   public record ActiveTransition(
       String fromStateName,
       String toStateName,
       float elapsedSeconds,
-      float blendSeconds) {
+      float blendSeconds,
+      float halfLife,
+      InertialState inertialState) {
     ActiveTransition withElapsed(final float elapsed) {
-      return new ActiveTransition(this.fromStateName, this.toStateName, elapsed, this.blendSeconds);
+      return new ActiveTransition(
+          this.fromStateName,
+          this.toStateName,
+          elapsed,
+          this.blendSeconds,
+          this.halfLife,
+          this.inertialState);
     }
   }
 }

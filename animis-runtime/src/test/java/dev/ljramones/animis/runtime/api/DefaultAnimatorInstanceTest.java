@@ -75,7 +75,8 @@ final class DefaultAnimatorInstanceTest {
     final float before = animator.pose().localTranslations()[0];
 
     animator.setBool("go", true);
-    animator.update(0f);
+    animator.update(0.05f);
+    animator.update(0.05f);
     final float after = animator.pose().localTranslations()[0];
 
     assertTrue(before < after);
