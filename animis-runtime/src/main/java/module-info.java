@@ -8,5 +8,6 @@ module org.animis.runtime {
   exports org.animis.runtime.api;
   exports org.animis.runtime.pose;
   exports org.animis.runtime.ik;
+  exports org.animis.runtime.secondary;
   exports org.animis.runtime.skinning;
 }

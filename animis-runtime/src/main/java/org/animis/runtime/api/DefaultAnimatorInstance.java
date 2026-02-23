@@ -9,6 +9,7 @@ import org.animis.runtime.ik.IkSolver;
 import org.animis.runtime.ik.IkTarget;
 import org.animis.runtime.pose.Pose;
 import org.animis.runtime.pose.PoseBuffer;
+import org.animis.runtime.secondary.SecondaryMotionSolver;
 import org.animis.runtime.skinning.SkinningComputer;
 import org.animis.runtime.skinning.SkinningOutput;
 import org.animis.runtime.state.StateMachineEvaluator;
@@ -23,6 +24,7 @@ public final class DefaultAnimatorInstance implements AnimatorInstance {
   private final StateMachineEvaluator stateMachineEvaluator;
   private final StateMachineInstance stateMachineInstance;
   private final IkSolver ikSolver;
+  private final SecondaryMotionSolver secondaryMotionSolver;
   private final SkinningComputer skinningComputer;
   private final Map<String, IkChain> ikChainsByName;
 
@@ -44,6 +46,7 @@ public final class DefaultAnimatorInstance implements AnimatorInstance {
       final StateMachineEvaluator stateMachineEvaluator,
       final StateMachineInstance stateMachineInstance,
       final IkSolver ikSolver,
+      final SecondaryMotionSolver secondaryMotionSolver,
       final SkinningComputer skinningComputer,
       final List<IkChain> ikChains,
       final Map<ClipId, org.animis.clip.Clip> clips,
@@ -52,6 +55,7 @@ public final class DefaultAnimatorInstance implements AnimatorInstance {
     this.stateMachineEvaluator = stateMachineEvaluator;
     this.stateMachineInstance = stateMachineInstance;
     this.ikSolver = ikSolver;
+    this.secondaryMotionSolver = secondaryMotionSolver;
     this.skinningComputer = skinningComputer;
     this.ikChainsByName = new HashMap<>();
     for (final IkChain chain : ikChains) {
@@ -133,6 +137,10 @@ public final class DefaultAnimatorInstance implements AnimatorInstance {
           this.ikSolver.solve(this.poseBuffer, this.skeleton, chain, entry.getValue());
         }
       }
+    }
+
+    if (this.secondaryMotionSolver != null) {
+      this.secondaryMotionSolver.solve(this.poseBuffer, this.skeleton, Math.max(0f, deltaSeconds));
     }
 
     this.lastPose = this.poseBuffer.toPose();
