@@ -88,7 +88,7 @@ Run tests only:
 mvn -q test
 ```
 
-## Documentation
+## Documentation 
 
 - [technology_explainer.md](technology_explainer.md) — deep dive into every pipeline stage,
   algorithm, and design decision
