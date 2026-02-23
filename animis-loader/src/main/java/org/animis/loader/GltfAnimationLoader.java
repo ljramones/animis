@@ -27,19 +27,22 @@ import java.util.Set;
 
 public final class GltfAnimationLoader implements AnimationLoader {
   private static final float DEFAULT_INTERVAL = 1.0f / 30.0f;
+  private static final int GLB_MAGIC = 0x46546C67;
+  private static final int GLB_VERSION = 2;
+  private static final int CHUNK_JSON = 0x4E4F534A;
+  private static final int CHUNK_BIN = 0x004E4942;
 
   @Override
   public AnimationLoadResult load(final Path path) throws IOException {
     if (path == null) {
       throw new IllegalArgumentException("path must be non-null");
     }
+    final byte[] bytes = Files.readAllBytes(path);
     final String name = path.getFileName().toString().toLowerCase();
-    if (name.endsWith(".glb")) {
-      throw new UnsupportedOperationException("GLB loading is not yet supported");
+    if (name.endsWith(".glb") || isGlb(bytes)) {
+      return loadGlb(bytes, path.getParent());
     }
-    try (InputStream in = Files.newInputStream(path)) {
-      return loadGltfJson(readAllUtf8(in), path.getParent());
-    }
+    return loadGltfJson(new String(bytes, StandardCharsets.UTF_8), path.getParent(), null);
   }
 
   @Override
@@ -47,21 +50,22 @@ public final class GltfAnimationLoader implements AnimationLoader {
     if (stream == null) {
       throw new IllegalArgumentException("stream must be non-null");
     }
+    final byte[] bytes = stream.readAllBytes();
     final String hint = formatHint == null ? "" : formatHint.toLowerCase();
-    if (hint.contains("glb")) {
-      throw new UnsupportedOperationException("GLB loading is not yet supported");
+    if (hint.contains("glb") || isGlb(bytes)) {
+      return loadGlb(bytes, null);
     }
-    return loadGltfJson(readAllUtf8(stream), null);
+    return loadGltfJson(new String(bytes, StandardCharsets.UTF_8), null, null);
   }
 
-  private AnimationLoadResult loadGltfJson(final String json, final Path baseDir) throws IOException {
+  private AnimationLoadResult loadGltfJson(final String json, final Path baseDir, final byte[] embeddedBin) throws IOException {
     final Map<String, Object> root = MiniJson.parseObject(json);
     final List<Map<String, Object>> nodes = objectList(root.get("nodes"));
     final List<Map<String, Object>> skins = objectList(root.get("skins"));
     final List<Map<String, Object>> animations = objectList(root.get("animations"));
     final List<Map<String, Object>> accessors = objectList(root.get("accessors"));
     final List<Map<String, Object>> views = objectList(root.get("bufferViews"));
-    final List<ByteBuffer> buffers = loadBuffers(baseDir, root);
+    final List<ByteBuffer> buffers = loadBuffers(baseDir, root, embeddedBin);
     final Map<Integer, Integer> parentNodeMap = buildParentNodeMap(nodes);
 
     if (skins.isEmpty()) {
@@ -98,6 +102,69 @@ public final class GltfAnimationLoader implements AnimationLoader {
 
     final List<Skeleton> skeletons = skinContexts.stream().map(ctx -> ctx.skeleton).toList();
     return new AnimationLoadResult(skeletons, clips, clipToSkeleton);
+  }
+
+  private static boolean isGlb(final byte[] bytes) {
+    if (bytes.length < 4) {
+      return false;
+    }
+    final int magic = ByteBuffer.wrap(bytes, 0, 4).order(ByteOrder.LITTLE_ENDIAN).getInt();
+    return magic == GLB_MAGIC;
+  }
+
+  private AnimationLoadResult loadGlb(final byte[] bytes, final Path baseDir) throws IOException {
+    if (bytes.length < 12) {
+      throw new IOException("Truncated GLB header");
+    }
+    final ByteBuffer buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);
+    final int magic = buffer.getInt();
+    if (magic != GLB_MAGIC) {
+      throw new IOException("Invalid GLB magic header");
+    }
+    final int version = buffer.getInt();
+    if (version != GLB_VERSION) {
+      throw new IOException("Unsupported GLB version: " + version);
+    }
+    final int length = buffer.getInt();
+    if (length != bytes.length) {
+      throw new IOException("GLB length mismatch");
+    }
+
+    byte[] jsonChunk = null;
+    byte[] binChunk = null;
+    while (buffer.remaining() > 0) {
+      if (buffer.remaining() < 8) {
+        throw new IOException("Truncated GLB chunk header");
+      }
+      final int chunkLength = buffer.getInt();
+      final int chunkType = buffer.getInt();
+      if (chunkLength < 0 || chunkLength > buffer.remaining()) {
+        throw new IOException("Invalid GLB chunk length");
+      }
+      final byte[] data = new byte[chunkLength];
+      buffer.get(data);
+      if (chunkType == CHUNK_JSON) {
+        if (jsonChunk != null) {
+          throw new IOException("GLB contains multiple JSON chunks");
+        }
+        jsonChunk = data;
+      } else if (chunkType == CHUNK_BIN && binChunk == null) {
+        binChunk = data;
+      }
+    }
+    if (jsonChunk == null) {
+      throw new IOException("GLB missing JSON chunk");
+    }
+    final String json = sanitizeJsonChunk(jsonChunk);
+    return loadGltfJson(json, baseDir, binChunk);
+  }
+
+  private static String sanitizeJsonChunk(final byte[] jsonChunk) {
+    int end = jsonChunk.length;
+    while (end > 0 && jsonChunk[end - 1] == 0) {
+      end--;
+    }
+    return new String(jsonChunk, 0, end, StandardCharsets.UTF_8);
   }
 
   private static SkinContext buildSkinContext(
@@ -345,13 +412,18 @@ public final class GltfAnimationLoader implements AnimationLoader {
     return out;
   }
 
-  private static List<ByteBuffer> loadBuffers(final Path baseDir, final Map<String, Object> root) throws IOException {
+  private static List<ByteBuffer> loadBuffers(final Path baseDir, final Map<String, Object> root, final byte[] embeddedBin)
+      throws IOException {
     final List<Map<String, Object>> buffers = objectList(root.get("buffers"));
     final ArrayList<ByteBuffer> out = new ArrayList<>(buffers.size());
     for (final Map<String, Object> buffer : buffers) {
       final String uri = stringOr(buffer.get("uri"), null);
-      if (uri == null) {
-        throw new IllegalArgumentException("Embedded GLB buffers are not supported in .gltf loader");
+      if (uri == null || uri.isBlank()) {
+        if (embeddedBin == null) {
+          throw new IllegalArgumentException("Buffer URI missing and no embedded GLB BIN chunk present");
+        }
+        out.add(ByteBuffer.wrap(embeddedBin).order(ByteOrder.LITTLE_ENDIAN));
+        continue;
       }
       final byte[] bytes = readUri(baseDir, uri);
       out.add(ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN));
@@ -563,10 +635,6 @@ public final class GltfAnimationLoader implements AnimationLoader {
       out[i] = asFloat(values.get(i));
     }
     return out;
-  }
-
-  private static String readAllUtf8(final InputStream stream) throws IOException {
-    return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
   }
 
   private static String stringOr(final Object value, final String fallback) {
