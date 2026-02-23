@@ -4,6 +4,7 @@ module org.animis.runtime {
   // MeshForge currently ships as an automatic module named "meshforge".
   // If MeshForge adds module-info.java, update this to its explicit module name.
   requires meshforge;
+  requires collision.detection;
 
   exports org.animis.runtime.api;
   exports org.animis.runtime.pose;
