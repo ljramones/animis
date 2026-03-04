@@ -3,9 +3,9 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
-  <groupId>com.github.ljramones</groupId>
+  <groupId>org.animis</groupId>
   <artifactId>animis-parent</artifactId>
-  <version>0.1.0-SNAPSHOT</version>
+  <version>1.0.0</version>
   <packaging>pom</packaging>
 
   <name>animis-parent</name>
@@ -23,7 +23,7 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <maven.compiler.release>25</maven.compiler.release>
     <maven.compiler.parameters>true</maven.compiler.parameters>
-    <vectrix.version>1.10.9</vectrix.version>
+    <vectrix.version>1.10.12</vectrix.version>
     <meshforge.version>1.1.0</meshforge.version>
     <junit.version>5.10.2</junit.version>
   </properties>
