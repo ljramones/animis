@@ -23,7 +23,7 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <maven.compiler.release>25</maven.compiler.release>
     <maven.compiler.parameters>true</maven.compiler.parameters>
-    <vectrix.version>1.10.12</vectrix.version>
+    <vectrix.version>1.10.13</vectrix.version>
     <meshforge.version>1.1.0</meshforge.version>
     <junit.version>5.10.2</junit.version>
   </properties>
