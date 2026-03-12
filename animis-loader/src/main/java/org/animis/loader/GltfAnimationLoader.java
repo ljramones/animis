@@ -8,6 +8,9 @@ import org.animis.clip.TransformTrack;
 import org.animis.skeleton.BindTransform;
 import org.animis.skeleton.Joint;
 import org.animis.skeleton.Skeleton;
+import org.vectrix.core.Matrix4f;
+import org.vectrix.core.Quaternionf;
+import org.vectrix.core.Vector3f;
 import org.meshforge.loader.gltf.read.MiniJson;
 import java.io.IOException;
 import java.io.InputStream;
@@ -155,8 +158,8 @@ public final class GltfAnimationLoader implements AnimationLoader {
     if (jsonChunk == null) {
       throw new IOException("GLB missing JSON chunk");
     }
-    final String json = sanitizeJsonChunk(jsonChunk);
-    return loadGltfJson(json, baseDir, binChunk);
+    final String jsonStr = sanitizeJsonChunk(jsonChunk);
+    return loadGltfJson(jsonStr, baseDir, binChunk);
   }
 
   private static String sanitizeJsonChunk(final byte[] jsonChunk) {
@@ -189,10 +192,11 @@ public final class GltfAnimationLoader implements AnimationLoader {
     }
 
     final float[] inverseBind = readInverseBindMatrices(skin, accessors, views, buffers, jointNodes.size());
-    final float[][] worldBind = inverseBind == null ? null : invertAllMat4(inverseBind, jointNodes.size());
+    final Matrix4f[] worldBind = inverseBind == null ? null : invertAllMat4(inverseBind, jointNodes.size());
 
     final ArrayList<Joint> joints = new ArrayList<>(jointNodes.size());
-    final float[][] localBindMatrices = new float[jointNodes.size()][16];
+    final Matrix4f tempInv = new Matrix4f();
+    final Matrix4f tempLocal = new Matrix4f();
     for (int i = 0; i < jointNodes.size(); i++) {
       final int nodeIndex = jointNodes.get(i);
       final int parentNode = parentNodeMap.getOrDefault(nodeIndex, -1);
@@ -200,14 +204,13 @@ public final class GltfAnimationLoader implements AnimationLoader {
 
       final BindTransform bind;
       if (worldBind != null) {
-        final float[] localMatrix;
         if (parentJoint < 0) {
-          localMatrix = worldBind[i];
+          bind = decomposeBind(worldBind[i]);
         } else {
-          localMatrix = mul(invertMat4(worldBind[parentJoint]), worldBind[i]);
+          worldBind[parentJoint].invert(tempInv);
+          tempInv.mul(worldBind[i], tempLocal);
+          bind = decomposeBind(tempLocal);
         }
-        localBindMatrices[i] = localMatrix;
-        bind = decomposeBind(localMatrix);
       } else {
         bind = bindFromNode(nodes.get(nodeIndex));
       }
@@ -223,6 +226,19 @@ public final class GltfAnimationLoader implements AnimationLoader {
       }
     }
     return new SkinContext(new Skeleton("skin_" + skinIndex, joints, rootJoint), nodeToJoint);
+  }
+
+  private static BindTransform decomposeBind(final Matrix4f m) {
+    final Vector3f translation = new Vector3f();
+    final Vector3f scale = new Vector3f();
+    final Quaternionf rotation = new Quaternionf();
+    m.getTranslation(translation);
+    m.getScale(scale);
+    m.getNormalizedRotation(rotation);
+    return new BindTransform(
+        translation.x, translation.y, translation.z,
+        rotation.x, rotation.y, rotation.z, rotation.w,
+        scale.x, scale.y, scale.z);
   }
 
   private static Clip buildClipForSkin(
@@ -371,6 +387,19 @@ public final class GltfAnimationLoader implements AnimationLoader {
     return readFloatAccessorData(accessor, buffers);
   }
 
+  private static Matrix4f[] invertAllMat4(final float[] mats, final int count) {
+    final Matrix4f src = new Matrix4f();
+    final Matrix4f[] out = new Matrix4f[count];
+    for (int i = 0; i < count; i++) {
+      final float[] slice = new float[16];
+      System.arraycopy(mats, i * 16, slice, 0, 16);
+      src.set(slice);
+      out[i] = new Matrix4f();
+      src.invert(out[i]);
+    }
+    return out;
+  }
+
   private static Accessor accessor(
       final List<Map<String, Object>> accessors,
       final List<Map<String, Object>> views,
@@ -474,151 +503,22 @@ public final class GltfAnimationLoader implements AnimationLoader {
 
   private static BindTransform bindFromNode(final Map<String, Object> node) {
     final float[] t = floatArray(node.get("translation"), 3, new float[] {0f, 0f, 0f});
-    final float[] r = normalizeQuaternionArray(floatArray(node.get("rotation"), 4, new float[] {0f, 0f, 0f, 1f}));
+    final Quaternionf q = new Quaternionf();
+    final float[] r = floatArray(node.get("rotation"), 4, new float[] {0f, 0f, 0f, 1f});
+    q.set(r[0], r[1], r[2], r[3]).normalize();
     final float[] s = floatArray(node.get("scale"), 3, new float[] {1f, 1f, 1f});
-    return new BindTransform(t[0], t[1], t[2], r[0], r[1], r[2], r[3], s[0], s[1], s[2]);
-  }
-
-  private static BindTransform decomposeBind(final float[] m) {
-    final float tx = m[12];
-    final float ty = m[13];
-    final float tz = m[14];
-    final float sx = (float) Math.sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
-    final float sy = (float) Math.sqrt(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
-    final float sz = (float) Math.sqrt(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]);
-    final float r00 = m[0] / Math.max(sx, 1e-8f);
-    final float r01 = m[4] / Math.max(sy, 1e-8f);
-    final float r02 = m[8] / Math.max(sz, 1e-8f);
-    final float r10 = m[1] / Math.max(sx, 1e-8f);
-    final float r11 = m[5] / Math.max(sy, 1e-8f);
-    final float r12 = m[9] / Math.max(sz, 1e-8f);
-    final float r20 = m[2] / Math.max(sx, 1e-8f);
-    final float r21 = m[6] / Math.max(sy, 1e-8f);
-    final float r22 = m[10] / Math.max(sz, 1e-8f);
-    final float[] q = quatFromRotationMatrix(r00, r01, r02, r10, r11, r12, r20, r21, r22);
-    return new BindTransform(tx, ty, tz, q[0], q[1], q[2], q[3], sx, sy, sz);
-  }
-
-  private static float[] quatFromRotationMatrix(
-      final float m00, final float m01, final float m02,
-      final float m10, final float m11, final float m12,
-      final float m20, final float m21, final float m22) {
-    final float trace = m00 + m11 + m22;
-    float x;
-    float y;
-    float z;
-    float w;
-    if (trace > 0f) {
-      final float s = (float) Math.sqrt(trace + 1f) * 2f;
-      w = 0.25f * s;
-      x = (m21 - m12) / s;
-      y = (m02 - m20) / s;
-      z = (m10 - m01) / s;
-    } else if (m00 > m11 && m00 > m22) {
-      final float s = (float) Math.sqrt(1f + m00 - m11 - m22) * 2f;
-      w = (m21 - m12) / s;
-      x = 0.25f * s;
-      y = (m01 + m10) / s;
-      z = (m02 + m20) / s;
-    } else if (m11 > m22) {
-      final float s = (float) Math.sqrt(1f + m11 - m00 - m22) * 2f;
-      w = (m02 - m20) / s;
-      x = (m01 + m10) / s;
-      y = 0.25f * s;
-      z = (m12 + m21) / s;
-    } else {
-      final float s = (float) Math.sqrt(1f + m22 - m00 - m11) * 2f;
-      w = (m10 - m01) / s;
-      x = (m02 + m20) / s;
-      y = (m12 + m21) / s;
-      z = 0.25f * s;
-    }
-    return normalizeQuaternionArray(new float[] {x, y, z, w});
-  }
-
-  private static float[][] invertAllMat4(final float[] mats, final int count) {
-    final float[][] out = new float[count][16];
-    for (int i = 0; i < count; i++) {
-      final float[] m = new float[16];
-      System.arraycopy(mats, i * 16, m, 0, 16);
-      out[i] = invertMat4(m);
-    }
-    return out;
-  }
-
-  private static float[] invertMat4(final float[] m) {
-    final float[] inv = new float[16];
-    inv[0] = m[5] * m[10] * m[15] - m[5] * m[11] * m[14] - m[9] * m[6] * m[15]
-        + m[9] * m[7] * m[14] + m[13] * m[6] * m[11] - m[13] * m[7] * m[10];
-    inv[4] = -m[4] * m[10] * m[15] + m[4] * m[11] * m[14] + m[8] * m[6] * m[15]
-        - m[8] * m[7] * m[14] - m[12] * m[6] * m[11] + m[12] * m[7] * m[10];
-    inv[8] = m[4] * m[9] * m[15] - m[4] * m[11] * m[13] - m[8] * m[5] * m[15]
-        + m[8] * m[7] * m[13] + m[12] * m[5] * m[11] - m[12] * m[7] * m[9];
-    inv[12] = -m[4] * m[9] * m[14] + m[4] * m[10] * m[13] + m[8] * m[5] * m[14]
-        - m[8] * m[6] * m[13] - m[12] * m[5] * m[10] + m[12] * m[6] * m[9];
-    inv[1] = -m[1] * m[10] * m[15] + m[1] * m[11] * m[14] + m[9] * m[2] * m[15]
-        - m[9] * m[3] * m[14] - m[13] * m[2] * m[11] + m[13] * m[3] * m[10];
-    inv[5] = m[0] * m[10] * m[15] - m[0] * m[11] * m[14] - m[8] * m[2] * m[15]
-        + m[8] * m[3] * m[14] + m[12] * m[2] * m[11] - m[12] * m[3] * m[10];
-    inv[9] = -m[0] * m[9] * m[15] + m[0] * m[11] * m[13] + m[8] * m[1] * m[15]
-        - m[8] * m[3] * m[13] - m[12] * m[1] * m[11] + m[12] * m[3] * m[9];
-    inv[13] = m[0] * m[9] * m[14] - m[0] * m[10] * m[13] - m[8] * m[1] * m[14]
-        + m[8] * m[2] * m[13] + m[12] * m[1] * m[10] - m[12] * m[2] * m[9];
-    inv[2] = m[1] * m[6] * m[15] - m[1] * m[7] * m[14] - m[5] * m[2] * m[15]
-        + m[5] * m[3] * m[14] + m[13] * m[2] * m[7] - m[13] * m[3] * m[6];
-    inv[6] = -m[0] * m[6] * m[15] + m[0] * m[7] * m[14] + m[4] * m[2] * m[15]
-        - m[4] * m[3] * m[14] - m[12] * m[2] * m[7] + m[12] * m[3] * m[6];
-    inv[10] = m[0] * m[5] * m[15] - m[0] * m[7] * m[13] - m[4] * m[1] * m[15]
-        + m[4] * m[3] * m[13] + m[12] * m[1] * m[7] - m[12] * m[3] * m[5];
-    inv[14] = -m[0] * m[5] * m[14] + m[0] * m[6] * m[13] + m[4] * m[1] * m[14]
-        - m[4] * m[2] * m[13] - m[12] * m[1] * m[6] + m[12] * m[2] * m[5];
-    inv[3] = -m[1] * m[6] * m[11] + m[1] * m[7] * m[10] + m[5] * m[2] * m[11]
-        - m[5] * m[3] * m[10] - m[9] * m[2] * m[7] + m[9] * m[3] * m[6];
-    inv[7] = m[0] * m[6] * m[11] - m[0] * m[7] * m[10] - m[4] * m[2] * m[11]
-        + m[4] * m[3] * m[10] + m[8] * m[2] * m[7] - m[8] * m[3] * m[6];
-    inv[11] = -m[0] * m[5] * m[11] + m[0] * m[7] * m[9] + m[4] * m[1] * m[11]
-        - m[4] * m[3] * m[9] - m[8] * m[1] * m[7] + m[8] * m[3] * m[5];
-    inv[15] = m[0] * m[5] * m[10] - m[0] * m[6] * m[9] - m[4] * m[1] * m[10]
-        + m[4] * m[2] * m[9] + m[8] * m[1] * m[6] - m[8] * m[2] * m[5];
-    float det = m[0] * inv[0] + m[1] * inv[4] + m[2] * inv[8] + m[3] * inv[12];
-    if (Math.abs(det) < 1e-8f) {
-      throw new IllegalArgumentException("Matrix is not invertible");
-    }
-    det = 1f / det;
-    for (int i = 0; i < 16; i++) {
-      inv[i] *= det;
-    }
-    return inv;
-  }
-
-  private static float[] mul(final float[] a, final float[] b) {
-    final float[] out = new float[16];
-    for (int col = 0; col < 4; col++) {
-      for (int row = 0; row < 4; row++) {
-        out[col * 4 + row] =
-            a[0 * 4 + row] * b[col * 4 + 0]
-                + a[1 * 4 + row] * b[col * 4 + 1]
-                + a[2 * 4 + row] * b[col * 4 + 2]
-                + a[3 * 4 + row] * b[col * 4 + 3];
-      }
-    }
-    return out;
+    return new BindTransform(t[0], t[1], t[2], q.x, q.y, q.z, q.w, s[0], s[1], s[2]);
   }
 
   private static float[] normalizeQuaternionArray(final float[] q) {
-    final float lenSq = q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3];
-    if (lenSq <= 1e-10f) {
-      q[0] = 0f;
-      q[1] = 0f;
-      q[2] = 0f;
-      q[3] = 1f;
-      return q;
+    final Quaternionf temp = new Quaternionf();
+    for (int i = 0; i < q.length; i += 4) {
+      temp.set(q[i], q[i + 1], q[i + 2], q[i + 3]).normalize();
+      q[i] = temp.x;
+      q[i + 1] = temp.y;
+      q[i + 2] = temp.z;
+      q[i + 3] = temp.w;
     }
-    final float inv = (float) (1.0 / Math.sqrt(lenSq));
-    q[0] *= inv;
-    q[1] *= inv;
-    q[2] *= inv;
-    q[3] *= inv;
     return q;
   }
 
@@ -730,7 +630,7 @@ public final class GltfAnimationLoader implements AnimationLoader {
       }
       final float[] b = key(right);
       if (this.path.equals("rotation")) {
-        return slerp(a, b, alpha);
+        return slerpArray(a, b, alpha);
       }
       return lerp(a, b, alpha);
     }
@@ -749,37 +649,12 @@ public final class GltfAnimationLoader implements AnimationLoader {
       return out;
     }
 
-    private static float[] slerp(final float[] a, final float[] bIn, final float t) {
-      float bx = bIn[0];
-      float by = bIn[1];
-      float bz = bIn[2];
-      float bw = bIn[3];
-      final float ax = a[0];
-      final float ay = a[1];
-      final float az = a[2];
-      final float aw = a[3];
-      float dot = ax * bx + ay * by + az * bz + aw * bw;
-      if (dot < 0f) {
-        dot = -dot;
-        bx = -bx;
-        by = -by;
-        bz = -bz;
-        bw = -bw;
-      }
-      if (dot > 0.9995f) {
-        return normalizeQuaternionArray(new float[] {
-            ax + t * (bx - ax), ay + t * (by - ay), az + t * (bz - az), aw + t * (bw - aw)
-        });
-      }
-      final float theta0 = (float) Math.acos(Math.max(-1f, Math.min(1f, dot)));
-      final float theta = theta0 * t;
-      final float sinTheta = (float) Math.sin(theta);
-      final float sinTheta0 = (float) Math.sin(theta0);
-      final float s0 = (float) Math.cos(theta) - dot * sinTheta / sinTheta0;
-      final float s1 = sinTheta / sinTheta0;
-      return normalizeQuaternionArray(new float[] {
-          s0 * ax + s1 * bx, s0 * ay + s1 * by, s0 * az + s1 * bz, s0 * aw + s1 * bw
-      });
+    private static float[] slerpArray(final float[] a, final float[] b, final float t) {
+      final Quaternionf qa = new Quaternionf(a[0], a[1], a[2], a[3]);
+      final Quaternionf qb = new Quaternionf(b[0], b[1], b[2], b[3]);
+      final Quaternionf result = new Quaternionf();
+      qa.slerp(qb, t, result).normalize(result);
+      return new float[] {result.x, result.y, result.z, result.w};
     }
   }
 
