@@ -16,6 +16,7 @@ import org.animis.runtime.api.RootMotionDelta;
 import org.animis.runtime.pose.PoseBuffer;
 import org.animis.runtime.sampling.ClipSampleResult;
 import org.animis.runtime.sampling.ClipSampler;
+import org.dynamisengine.vectrix.core.Quaternionf;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -101,7 +102,7 @@ public final class DefaultBlendEvaluator implements BlendEvaluator {
     evaluateNode(node.a(), sideEffectFree, a, scratch);
     evaluateNode(node.b(), sideEffectFree, b, scratch);
     final float t = clamp01(ctx.floatParams().getOrDefault(node.parameter(), 0f));
-    blendPoses(a, b, t, outPose);
+    blendPoses(a, b, t, outPose, scratch);
     accumulateWeightedClipEvents(node.a(), node.b(), t, ctx);
   }
 
@@ -141,7 +142,7 @@ public final class DefaultBlendEvaluator implements BlendEvaluator {
       final EvalContext sideEffectFree = ctx.withoutAccumulators();
       evaluateNode(a.node(), sideEffectFree, poseA, scratch);
       evaluateNode(b.node(), sideEffectFree, poseB, scratch);
-      blendPoses(poseA, poseB, t, outPose);
+      blendPoses(poseA, poseB, t, outPose, scratch);
       accumulateWeightedClipEvents(a.node(), b.node(), t, ctx);
       return;
     }
@@ -159,7 +160,7 @@ public final class DefaultBlendEvaluator implements BlendEvaluator {
     final EvalContext sideEffectFree = ctx.withoutAccumulators();
     evaluateNode(node.base(), sideEffectFree, base, scratch);
     evaluateNode(node.additive(), sideEffectFree, additive, scratch);
-    applyAdditive(base, additive, clamp01(node.weight()), outPose);
+    applyAdditive(base, additive, clamp01(node.weight()), outPose, scratch);
   }
 
   private void accumulateWeightedClipEvents(
@@ -269,8 +270,8 @@ public final class DefaultBlendEvaluator implements BlendEvaluator {
     final float cycle = Math.max(1e-4f, node.cycleSeconds());
     final float phase = (float) (2.0 * Math.PI * (timeSeconds / cycle));
     final float angle = node.amplitudeRadians() * exhaustion * (float) Math.sin(phase);
-    final float[] q = quatFromAxisAngle(1f, 0f, 0f, angle);
-    outPose.setRotation(joint, q[0], q[1], q[2], q[3]);
+    final Quaternionf q = new Quaternionf().rotateX(angle);
+    outPose.setRotation(joint, q.x, q.y, q.z, q.w);
   }
 
   private void evalWeightShiftNode(
@@ -314,12 +315,8 @@ public final class DefaultBlendEvaluator implements BlendEvaluator {
     state[0] = moveTowards(state[0], targetYaw, maxStep);
     state[1] = moveTowards(state[1], targetPitch, maxStep);
 
-    final float[] qYaw = quatFromAxisAngle(0f, 1f, 0f, state[0]);
-    final float[] qPitch = quatFromAxisAngle(1f, 0f, 0f, state[1]);
-    final float[] q = mul(
-        qYaw[0], qYaw[1], qYaw[2], qYaw[3],
-        qPitch[0], qPitch[1], qPitch[2], qPitch[3]);
-    outPose.setRotation(joint, q[0], q[1], q[2], q[3]);
+    final Quaternionf q = new Quaternionf().rotateY(state[0]).rotateX(state[1]);
+    outPose.setRotation(joint, q.x, q.y, q.z, q.w);
   }
 
   private static List<OneDChild> sortedChildren(final List<OneDChild> children) {
@@ -332,13 +329,17 @@ public final class DefaultBlendEvaluator implements BlendEvaluator {
       final PoseBuffer a,
       final PoseBuffer b,
       final float t,
-      final PoseBuffer outPose) {
+      final PoseBuffer outPose,
+      final ScratchPool scratch) {
     final float[] at = a.localTranslations();
     final float[] bt = b.localTranslations();
     final float[] as = a.localScales();
     final float[] bs = b.localScales();
     final float[] ar = a.localRotations();
     final float[] br = b.localRotations();
+    final Quaternionf qa = scratch.quatA;
+    final Quaternionf qb = scratch.quatB;
+    final Quaternionf qOut = scratch.quatOut;
 
     for (int i = 0; i < outPose.jointCount(); i++) {
       final int tBase = i * 3;
@@ -354,11 +355,10 @@ public final class DefaultBlendEvaluator implements BlendEvaluator {
           lerp(as[tBase + 2], bs[tBase + 2], t));
 
       final int rBase = i * 4;
-      final float[] q = slerp(
-          ar[rBase], ar[rBase + 1], ar[rBase + 2], ar[rBase + 3],
-          br[rBase], br[rBase + 1], br[rBase + 2], br[rBase + 3],
-          t);
-      outPose.setRotation(i, q[0], q[1], q[2], q[3]);
+      qa.set(ar[rBase], ar[rBase + 1], ar[rBase + 2], ar[rBase + 3]);
+      qb.set(br[rBase], br[rBase + 1], br[rBase + 2], br[rBase + 3]);
+      qa.slerp(qb, t, qOut).normalize();
+      outPose.setRotation(i, qOut.x, qOut.y, qOut.z, qOut.w);
     }
   }
 
@@ -366,13 +366,18 @@ public final class DefaultBlendEvaluator implements BlendEvaluator {
       final PoseBuffer base,
       final PoseBuffer additive,
       final float weight,
-      final PoseBuffer outPose) {
+      final PoseBuffer outPose,
+      final ScratchPool scratch) {
     final float[] bt = base.localTranslations();
     final float[] at = additive.localTranslations();
     final float[] bs = base.localScales();
     final float[] as = additive.localScales();
     final float[] br = base.localRotations();
     final float[] ar = additive.localRotations();
+    final Quaternionf identity = scratch.quatA;
+    final Quaternionf addQ = scratch.quatB;
+    final Quaternionf weightedAdd = scratch.quatOut;
+    final Quaternionf baseQ = new Quaternionf();
 
     for (int i = 0; i < outPose.jointCount(); i++) {
       final int tBase = i * 3;
@@ -388,11 +393,12 @@ public final class DefaultBlendEvaluator implements BlendEvaluator {
           bs[tBase + 2] + (as[tBase + 2] - 1f) * weight);
 
       final int rBase = i * 4;
-      final float[] weightedAdd = slerp(0f, 0f, 0f, 1f, ar[rBase], ar[rBase + 1], ar[rBase + 2], ar[rBase + 3], weight);
-      final float[] composed = mul(
-          br[rBase], br[rBase + 1], br[rBase + 2], br[rBase + 3],
-          weightedAdd[0], weightedAdd[1], weightedAdd[2], weightedAdd[3]);
-      outPose.setRotation(i, composed[0], composed[1], composed[2], composed[3]);
+      identity.set(0f, 0f, 0f, 1f);
+      addQ.set(ar[rBase], ar[rBase + 1], ar[rBase + 2], ar[rBase + 3]);
+      identity.slerp(addQ, weight, weightedAdd).normalize();
+      baseQ.set(br[rBase], br[rBase + 1], br[rBase + 2], br[rBase + 3]);
+      baseQ.mul(weightedAdd, weightedAdd).normalize();
+      outPose.setRotation(i, weightedAdd.x, weightedAdd.y, weightedAdd.z, weightedAdd.w);
     }
   }
 
@@ -435,94 +441,15 @@ public final class DefaultBlendEvaluator implements BlendEvaluator {
     }
   }
 
-  private static float[] quatFromAxisAngle(final float ax, final float ay, final float az, final float angle) {
-    final float lenSq = ax * ax + ay * ay + az * az;
-    if (lenSq <= 1e-8f) {
-      return new float[] {0f, 0f, 0f, 1f};
-    }
-    final float invLen = 1f / (float) Math.sqrt(lenSq);
-    final float half = angle * 0.5f;
-    final float s = (float) Math.sin(half);
-    return new float[] {ax * invLen * s, ay * invLen * s, az * invLen * s, (float) Math.cos(half)};
-  }
-
   private static float lerp(final float a, final float b, final float t) {
     return a + (b - a) * t;
   }
 
-  private static float[] mul(
-      final float ax,
-      final float ay,
-      final float az,
-      final float aw,
-      final float bx,
-      final float by,
-      final float bz,
-      final float bw) {
-    return normalize(
-        aw * bx + ax * bw + ay * bz - az * by,
-        aw * by - ax * bz + ay * bw + az * bx,
-        aw * bz + ax * by - ay * bx + az * bw,
-        aw * bw - ax * bx - ay * by - az * bz);
-  }
-
-  private static float[] slerp(
-      final float ax,
-      final float ay,
-      final float az,
-      final float aw,
-      final float bxIn,
-      final float byIn,
-      final float bzIn,
-      final float bwIn,
-      final float t) {
-    float bx = bxIn;
-    float by = byIn;
-    float bz = bzIn;
-    float bw = bwIn;
-
-    float dot = ax * bx + ay * by + az * bz + aw * bw;
-    if (dot < 0f) {
-      bx = -bx;
-      by = -by;
-      bz = -bz;
-      bw = -bw;
-      dot = -dot;
-    }
-
-    if (dot > 0.9995f) {
-      return normalize(
-          lerp(ax, bx, t),
-          lerp(ay, by, t),
-          lerp(az, bz, t),
-          lerp(aw, bw, t));
-    }
-
-    final float theta0 = (float) Math.acos(dot);
-    final float theta = theta0 * t;
-    final float sinTheta = (float) Math.sin(theta);
-    final float sinTheta0 = (float) Math.sin(theta0);
-
-    final float s0 = (float) Math.cos(theta) - dot * sinTheta / sinTheta0;
-    final float s1 = sinTheta / sinTheta0;
-    return normalize(
-        s0 * ax + s1 * bx,
-        s0 * ay + s1 * by,
-        s0 * az + s1 * bz,
-        s0 * aw + s1 * bw);
-  }
-
-  private static float[] normalize(final float x, final float y, final float z, final float w) {
-    final float lenSq = x * x + y * y + z * z + w * w;
-    if (lenSq <= 0f) {
-      return new float[] {0f, 0f, 0f, 1f};
-    }
-    final float invLen = 1f / (float) Math.sqrt(lenSq);
-    return new float[] {x * invLen, y * invLen, z * invLen, w * invLen};
-  }
-
   private static final class ScratchPool {
     private final ArrayList<PoseBuffer> buffers;
+    private final Quaternionf quatA = new Quaternionf();
+    private final Quaternionf quatB = new Quaternionf();
+    private final Quaternionf quatOut = new Quaternionf();
     private int cursor;
     private int jointCount;
 
