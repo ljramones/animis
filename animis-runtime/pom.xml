@@ -22,7 +22,7 @@
     </dependency>
 
     <dependency>
-      <groupId>org.vectrix</groupId>
+      <groupId>org.dynamisengine</groupId>
       <artifactId>vectrix</artifactId>
       <version>${vectrix.version}</version>
     </dependency>
@@ -34,9 +34,9 @@
     </dependency>
 
     <dependency>
-      <groupId>io.github.ljramones</groupId>
+      <groupId>org.dynamiscollision</groupId>
       <artifactId>collision_detection</artifactId>
-      <version>1.1.0</version>
+      <version>1.1.1</version>
     </dependency>
 
     <dependency>

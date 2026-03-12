@@ -7,7 +7,7 @@ import org.dynamiscollision.constraints.PointConstraint3D;
 import org.dynamiscollision.contact.ContactSolver3D;
 import org.dynamiscollision.world.PhysicsStep3D;
 import org.dynamiscollision.world.RigidBodyAdapter3D;
-import org.vectrix.core.Vector3d;
+import org.dynamisengine.vectrix.core.Vector3d;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
