@@ -20,13 +20,15 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+
+import static org.animis.loader.GltfAccessorReader.*;
+import static org.animis.loader.GltfJsonHelper.*;
 
 public final class GltfAnimationLoader implements AnimationLoader {
   private static final float DEFAULT_INTERVAL = 1.0f / 30.0f;
@@ -279,14 +281,14 @@ public final class GltfAnimationLoader implements AnimationLoader {
       final int outputAccessor = asInt(sampler.get("output"));
       final Accessor input = accessor(accessors, views, inputAccessor);
       final Accessor output = accessor(accessors, views, outputAccessor);
-      if (input.components != 1) {
+      if (input.components() != 1) {
         throw new IllegalArgumentException("Sampler input accessor must be SCALAR");
       }
       final int expectedComponents = path.equals("rotation") ? 4 : 3;
-      if (output.components != expectedComponents) {
+      if (output.components() != expectedComponents) {
         throw new IllegalArgumentException("Accessor component count mismatch for path " + path);
       }
-      if (output.count != input.count) {
+      if (output.count() != input.count()) {
         throw new IllegalArgumentException("Sampler input/output keyframe count mismatch");
       }
       final float[] times = readFloatAccessorData(input, buffers);
@@ -377,14 +379,14 @@ public final class GltfAnimationLoader implements AnimationLoader {
     if (!(accessorObj instanceof Number number)) {
       return null;
     }
-    final Accessor accessor = accessor(accessors, views, number.intValue());
-    if (accessor.components != 16) {
+    final Accessor acc = accessor(accessors, views, number.intValue());
+    if (acc.components() != 16) {
       throw new IllegalArgumentException("inverseBindMatrices accessor must be MAT4");
     }
-    if (accessor.count != expectedJoints) {
+    if (acc.count() != expectedJoints) {
       throw new IllegalArgumentException("inverseBindMatrices count does not match joint count");
     }
-    return readFloatAccessorData(accessor, buffers);
+    return readFloatAccessorData(acc, buffers);
   }
 
   private static Matrix4f[] invertAllMat4(final float[] mats, final int count) {
@@ -398,85 +400,6 @@ public final class GltfAnimationLoader implements AnimationLoader {
       src.invert(out[i]);
     }
     return out;
-  }
-
-  private static Accessor accessor(
-      final List<Map<String, Object>> accessors,
-      final List<Map<String, Object>> views,
-      final int accessorIndex) {
-    final Map<String, Object> accessor = accessors.get(accessorIndex);
-    final int viewIndex = asInt(accessor.get("bufferView"));
-    final Map<String, Object> view = views.get(viewIndex);
-    final int componentType = asInt(accessor.get("componentType"));
-    if (componentType != 5126) {
-      throw new IllegalArgumentException("Unsupported accessor componentType: " + componentType);
-    }
-    final int components = switch (stringOr(accessor.get("type"), "")) {
-      case "SCALAR" -> 1;
-      case "VEC2" -> 2;
-      case "VEC3" -> 3;
-      case "VEC4" -> 4;
-      case "MAT4" -> 16;
-      default -> throw new IllegalArgumentException("Unsupported accessor type");
-    };
-    return new Accessor(
-        asInt(view.get("buffer")),
-        asIntOrDefault(view.get("byteOffset"), 0),
-        asIntOrDefault(view.get("byteStride"), components * 4),
-        asInt(accessor.get("count")),
-        asIntOrDefault(accessor.get("byteOffset"), 0),
-        components);
-  }
-
-  private static float[] readFloatAccessorData(final Accessor accessor, final List<ByteBuffer> buffers) {
-    final ByteBuffer buffer = buffers.get(accessor.buffer).duplicate().order(ByteOrder.LITTLE_ENDIAN);
-    final float[] out = new float[accessor.count * accessor.components];
-    int cursor = accessor.viewOffset + accessor.accessorOffset;
-    for (int i = 0; i < accessor.count; i++) {
-      for (int c = 0; c < accessor.components; c++) {
-        out[i * accessor.components + c] = buffer.getFloat(cursor + c * 4);
-      }
-      cursor += accessor.byteStride;
-    }
-    return out;
-  }
-
-  private static List<ByteBuffer> loadBuffers(final Path baseDir, final Map<String, Object> root, final byte[] embeddedBin)
-      throws IOException {
-    final List<Map<String, Object>> buffers = objectList(root.get("buffers"));
-    final ArrayList<ByteBuffer> out = new ArrayList<>(buffers.size());
-    for (final Map<String, Object> buffer : buffers) {
-      final String uri = stringOr(buffer.get("uri"), null);
-      if (uri == null || uri.isBlank()) {
-        if (embeddedBin == null) {
-          throw new IllegalArgumentException("Buffer URI missing and no embedded GLB BIN chunk present");
-        }
-        out.add(ByteBuffer.wrap(embeddedBin).order(ByteOrder.LITTLE_ENDIAN));
-        continue;
-      }
-      final byte[] bytes = readUri(baseDir, uri);
-      out.add(ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN));
-    }
-    return out;
-  }
-
-  private static byte[] readUri(final Path baseDir, final String uri) throws IOException {
-    if (uri.startsWith("data:")) {
-      final int comma = uri.indexOf(',');
-      if (comma < 0) {
-        throw new IllegalArgumentException("Invalid data URI");
-      }
-      final String metadata = uri.substring(0, comma);
-      final String payload = uri.substring(comma + 1);
-      if (metadata.endsWith(";base64")) {
-        return Base64.getDecoder().decode(payload);
-      }
-      return payload.getBytes(StandardCharsets.UTF_8);
-    }
-    if (baseDir == null) {
-      throw new IllegalArgumentException("Relative URI requires a base directory");
-    }
-    return Files.readAllBytes(baseDir.resolve(uri).normalize());
   }
 
   private static Map<Integer, Integer> buildParentNodeMap(final List<Map<String, Object>> nodes) {
@@ -521,67 +444,6 @@ public final class GltfAnimationLoader implements AnimationLoader {
     }
     return q;
   }
-
-  private static float[] floatArray(final Object raw, final int expected, final float[] defaults) {
-    final List<Object> values = list(raw);
-    if (values.isEmpty()) {
-      return defaults.clone();
-    }
-    if (values.size() != expected) {
-      throw new IllegalArgumentException("Expected " + expected + " values, got " + values.size());
-    }
-    final float[] out = new float[expected];
-    for (int i = 0; i < expected; i++) {
-      out[i] = asFloat(values.get(i));
-    }
-    return out;
-  }
-
-  private static String stringOr(final Object value, final String fallback) {
-    return value instanceof String s ? s : fallback;
-  }
-
-  @SuppressWarnings("unchecked")
-  private static List<Map<String, Object>> objectList(final Object value) {
-    return value == null ? List.of() : (List<Map<String, Object>>) value;
-  }
-
-  @SuppressWarnings("unchecked")
-  private static Map<String, Object> objectMap(final Object value) {
-    return value == null ? Map.of() : (Map<String, Object>) value;
-  }
-
-  @SuppressWarnings("unchecked")
-  private static List<Object> list(final Object value) {
-    return value == null ? List.of() : (List<Object>) value;
-  }
-
-  private static int asInt(final Object value) {
-    if (!(value instanceof Number n)) {
-      throw new IllegalArgumentException("Expected number, got: " + value);
-    }
-    return n.intValue();
-  }
-
-  private static int asIntOrDefault(final Object value, final int fallback) {
-    return value instanceof Number n ? n.intValue() : fallback;
-  }
-
-  private static float asFloat(final Object value) {
-    if (!(value instanceof Number n)) {
-      throw new IllegalArgumentException("Expected number, got: " + value);
-    }
-    return n.floatValue();
-  }
-
-  private record Accessor(
-      int buffer,
-      int viewOffset,
-      int byteStride,
-      int count,
-      int accessorOffset,
-      int components
-  ) {}
 
   private record SkinContext(Skeleton skeleton, Map<Integer, Integer> nodeToJoint) {}
 
