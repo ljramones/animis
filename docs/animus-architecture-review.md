@@ -34,11 +34,11 @@ Repository shape (`pom.xml`) is a 6-module Maven build:
 - `animis-demo` (integration/demo)
 
 Major packages and APIs:
-- `org.animis.*` model module: skeleton, clips, blend nodes, state-machine definitions, IK chain definitions, retarget maps, motion database/tagging.
-- `org.animis.runtime.api`: `AnimationRuntime`, `AnimatorInstance`, `RootMotionDelta`, motion matching/search and retarget/compression interfaces.
-- `org.animis.runtime.*` runtime internals surfaced publicly: blend evaluators, sampling, IK solvers, skinning, pose warping, secondary motion, and physics character controller.
-- `org.animis.loader`: `AnimationLoader`, `AnimationLoaderFactory`, `GltfAnimationLoader`, `BvhAnimationLoader`.
-- `org.animis.neural.api`: `NeuralPosePredictor`, `OnnxNeuralPosePredictor`, prediction/model-info records.
+- `org.dynamisengine.animis.*` model module: skeleton, clips, blend nodes, state-machine definitions, IK chain definitions, retarget maps, motion database/tagging.
+- `org.dynamisengine.animis.runtime.api`: `AnimationRuntime`, `AnimatorInstance`, `RootMotionDelta`, motion matching/search and retarget/compression interfaces.
+- `org.dynamisengine.animis.runtime.*` runtime internals surfaced publicly: blend evaluators, sampling, IK solvers, skinning, pose warping, secondary motion, and physics character controller.
+- `org.dynamisengine.animis.loader`: `AnimationLoader`, `AnimationLoaderFactory`, `GltfAnimationLoader`, `BvhAnimationLoader`.
+- `org.dynamisengine.animis.neural.api`: `NeuralPosePredictor`, `OnnxNeuralPosePredictor`, prediction/model-info records.
 
 Notable abstractions and runtime surfaces:
 - Runtime updates via `AnimatorInstance.update(deltaSeconds)` pipeline (state machine -> blend -> IK -> warp -> secondary -> optional physics -> skinning).
@@ -101,10 +101,10 @@ Repo-grounded dependency observations:
 API/internal split is only partially clean.
 
 Findings:
-- Good top-level API exists in `org.animis.runtime.api` (`AnimationRuntime`, `AnimatorInstance`, etc.).
-- `module-info.java` for `org.animis.runtime` exports many non-API implementation packages (`pose`, `ik`, `physics`, `secondary`, `warp`, `skinning`), making internal implementation details publicly consumable.
+- Good top-level API exists in `org.dynamisengine.animis.runtime.api` (`AnimationRuntime`, `AnimatorInstance`, etc.).
+- `module-info.java` for `org.dynamisengine.animis.runtime` exports many non-API implementation packages (`pose`, `ik`, `physics`, `secondary`, `warp`, `skinning`), making internal implementation details publicly consumable.
 - Default implementation classes (`DefaultAnimatorInstance`, `DefaultAnimationRuntime`, `DefaultPhysicsCharacterController`) are in exported packages and effectively part of public surface.
-- There is an internal marker package (`org.animis.runtime.internal`), but most implementation remains in exported packages.
+- There is an internal marker package (`org.dynamisengine.animis.runtime.internal`), but most implementation remains in exported packages.
 
 Assessment: public/internal boundaries are functional but broad; implementation leakage risk is real.
 

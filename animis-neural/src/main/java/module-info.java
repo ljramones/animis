@@ -1,5 +1,5 @@
-module org.animis.neural {
+module org.dynamisengine.animis.neural {
   requires com.microsoft.onnxruntime;
 
-  exports org.animis.neural.api;
+  exports org.dynamisengine.animis.neural.api;
 }

@@ -1,11 +1,11 @@
-module org.animis {
-  exports org.animis.skeleton;
-  exports org.animis.clip;
-  exports org.animis.blend;
-  exports org.animis.state;
-  exports org.animis.ik;
-  exports org.animis.common;
-  exports org.animis.retarget;
-  exports org.animis.motion;
-  exports org.animis.warp;
+module org.dynamisengine.animis {
+  exports org.dynamisengine.animis.skeleton;
+  exports org.dynamisengine.animis.clip;
+  exports org.dynamisengine.animis.blend;
+  exports org.dynamisengine.animis.state;
+  exports org.dynamisengine.animis.ik;
+  exports org.dynamisengine.animis.common;
+  exports org.dynamisengine.animis.retarget;
+  exports org.dynamisengine.animis.motion;
+  exports org.dynamisengine.animis.warp;
 }

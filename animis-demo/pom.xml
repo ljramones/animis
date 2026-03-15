@@ -4,7 +4,7 @@
   <modelVersion>4.0.0</modelVersion>
 
   <parent>
-    <groupId>org.animis</groupId>
+    <groupId>org.dynamisengine.animis</groupId>
     <artifactId>animis-parent</artifactId>
     <version>1.0.0</version>
     <relativePath>../pom.xml</relativePath>

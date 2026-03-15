@@ -4,7 +4,7 @@ Run benchmarks:
 
 ```bash
 mvn -f animis-perf/pom.xml -DskipTests compile exec:java \
-  -Dexec.mainClass=org.animis.perf.BenchmarkRunner
+  -Dexec.mainClass=org.dynamisengine.animis.perf.BenchmarkRunner
 ```
 
 Run a comprehensive forked pass (canonical):
@@ -13,7 +13,7 @@ Run a comprehensive forked pass (canonical):
 mvn -q -f animis-perf/pom.xml -DskipTests package
 mvn -q -f animis-perf/pom.xml -DskipTests dependency:build-classpath -Dmdep.outputFile=target/classpath.txt
 CP="animis-perf/target/classes:$(cat animis-perf/target/classpath.txt)"
-java -cp "$CP" org.openjdk.jmh.Main "org.animis.perf.*" \
+java -cp "$CP" org.openjdk.jmh.Main "org.dynamisengine.animis.perf.*" \
   -wi 5 -i 10 -w 1s -r 1s -f 2 -tu ms -rf csv \
   -rff perf/comprehensive-$(date +%Y%m%d-%H%M%S).csv
 cp perf/comprehensive-YYYYMMDD-HHMMSS.csv perf/latest.csv

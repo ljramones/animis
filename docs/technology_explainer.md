@@ -49,7 +49,7 @@ meshforge-loader (to reuse glTF parsing infrastructure). Neither loader nor neur
 animis-runtime. The dependency graph is a strict DAG.
 
 JPMS module descriptors enforce these boundaries at compile time. animis-runtime's internal
-evaluator implementations are in org.animis.runtime.internal, which is not exported. Callers
+evaluator implementations are in org.dynamisengine.animis.runtime.internal, which is not exported. Callers
 see only interfaces.
 
 ---

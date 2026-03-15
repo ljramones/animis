@@ -64,7 +64,7 @@ run under forked JMH on JDK 25 (canonical run: `perf/comprehensive-20260223-0951
 Run the perf gate:
 
 ```bash
-mvn -f animis-perf/pom.xml -DskipTests compile exec:java -Dexec.mainClass=org.animis.perf.BenchmarkRunner
+mvn -f animis-perf/pom.xml -DskipTests compile exec:java -Dexec.mainClass=org.dynamisengine.animis.perf.BenchmarkRunner
 ./perf/check_baseline.sh
 ```
 

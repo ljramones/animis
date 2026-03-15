@@ -1,7 +1,7 @@
-module org.animis.loader {
-  requires org.animis;
+module org.dynamisengine.animis.loader {
+  requires org.dynamisengine.animis;
   requires meshforge.loader;
   requires org.dynamisengine.vectrix;
 
-  exports org.animis.loader;
+  exports org.dynamisengine.animis.loader;
 }
