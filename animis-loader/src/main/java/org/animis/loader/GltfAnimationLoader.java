@@ -11,7 +11,7 @@ import org.animis.skeleton.Skeleton;
 import org.dynamisengine.vectrix.core.Matrix4f;
 import org.dynamisengine.vectrix.core.Quaternionf;
 import org.dynamisengine.vectrix.core.Vector3f;
-import org.meshforge.loader.gltf.read.MiniJson;
+import org.dynamisengine.meshforge.loader.gltf.read.MiniJson;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
