@@ -28,7 +28,7 @@
     </dependency>
 
     <dependency>
-      <groupId>org.meshforge</groupId>
+      <groupId>org.dynamisengine</groupId>
       <artifactId>meshforge</artifactId>
       <version>${meshforge.version}</version>
     </dependency>
