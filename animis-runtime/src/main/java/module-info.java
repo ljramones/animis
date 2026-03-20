@@ -13,4 +13,5 @@ module org.dynamisengine.animis.runtime {
   exports org.dynamisengine.animis.runtime.secondary;
   exports org.dynamisengine.animis.runtime.warp;
   exports org.dynamisengine.animis.runtime.skinning;
+  exports org.dynamisengine.animis.runtime.transform;
 }

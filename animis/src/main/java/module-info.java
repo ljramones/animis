@@ -8,4 +8,5 @@ module org.dynamisengine.animis {
   exports org.dynamisengine.animis.retarget;
   exports org.dynamisengine.animis.motion;
   exports org.dynamisengine.animis.warp;
+  exports org.dynamisengine.animis.transform;
 }
