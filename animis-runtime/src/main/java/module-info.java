@@ -3,7 +3,7 @@ module org.dynamisengine.animis.runtime {
   requires org.dynamisengine.vectrix;
   // MeshForge currently ships as an automatic module named "meshforge".
   // If MeshForge adds module-info.java, update this to its explicit module name.
-  requires meshforge;
+  requires org.dynamisengine.meshforge;
   requires org.dynamisengine.collision;
 
   exports org.dynamisengine.animis.runtime.api;
